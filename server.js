@@ -33,6 +33,12 @@ const server = http.createServer((req, res) => {
   }
 
   let rel = decodeURIComponent(u.pathname);
+  if (rel === '/public') {
+    res.writeHead(301, { Location: '/public/' });
+    res.end();
+    return;
+  }
+  if (rel.startsWith('/public/')) rel = rel.slice('/public'.length);
   if (rel === '/') rel = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!filePath.startsWith(PUBLIC_DIR)) {
