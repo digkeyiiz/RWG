@@ -1,0 +1,15 @@
+{
+  "name": "vios-garage",
+  "version": "1.0.0",
+  "description": "VIOS GARAGE — Bangkok Expressway & Street Racing Online (Three.js + Socket.IO)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
