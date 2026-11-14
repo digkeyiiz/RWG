@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>VIOS GARAGE — Street Racing Online</title>
+  <meta name="theme-color" content="#0a0b0e">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/", "three-mesh-bvh": "./vendor/three-mesh-bvh/index.module.js" } }
+  </script>
+</head>
+<body class="title">
+  <canvas id="view"></canvas>
+
+  <header id="topbar">
+    <div class="brand"><span class="logo">VIOS</span><span class="logo2">GARAGE</span><span class="tagline">STREET RACING ONLINE</span></div>
+    <div id="garageBar"><b id="garageName">อู่</b><button id="btnExitGarage" class="on">ขับออกจากอู่ ▶</button></div>
+    <div class="tools">
+      <button id="btnRotate" class="gonly" title="หมุนรอบคันอัตโนมัติ">⟳ 360°</button>
+      <div class="seg small gonly" id="camSeg">
+        <button data-cam="front34">มุมหน้า</button>
+        <button data-cam="side">ข้าง</button>
+        <button data-cam="rear34">มุมหลัง</button>
+        <button data-cam="top">บน</button>
+        <button data-cam="wheel">ล้อ</button>
+      </div>
+      <button id="btnOnline" class="pill" title="ผู้เล่นในเมือง"><i class="dot"></i><span id="onlineCount">0</span></button>
+      <button id="btnMap" title="แผนที่ (M)">🗺️</button>
+      <button id="btnProfile" title="โปรไฟล์ / อันดับ">👤</button>
+      <button id="btnSocial" title="เพื่อน · ปาร์ตี้ · บัญชี">👥</button>
+      <button id="btnChat" title="แชท">💬</button>
+      <button id="btnGfx" title="ตั้งค่า">⚙️</button>
+      <button id="btnShot" title="ถ่ายภาพ">📷</button>
+      <button id="btnFull" title="เต็มจอ">⛶</button>
+    </div>
+  </header>
+
+  <div id="wallet" hidden><div class="money">฿0</div><div class="rep">0 REP</div></div>
+  <div id="feed"></div>
+  <div id="lobbies"></div>
+  <div id="socialCards"></div>
+  <div id="social" hidden><div class="ob-head"><div class="seg so-tabs"><button data-t="friends">👥 เพื่อน</button><button data-t="party">🎉 ปาร์ตี้</button><button data-t="account">🔑 บัญชี</button></div><button class="so-x" aria-label="ปิด">✕</button></div><div class="so-body"></div></div>
+  <div id="inspect" hidden></div>
+  <div id="heatHud" hidden></div>
+  <div id="prompt" hidden><kbd>E</kbd><span class="pt"></span><button id="promptBtn">แตะ</button></div>
+
+  <aside id="panel">
+    <button id="panelToggle" aria-label="เปิด/ปิดเมนู">☰ แต่งรถ</button>
+    <div id="saveBadge" title="บันทึกอัตโนมัติ">✓ บันทึกอัตโนมัติ</div>
+    <nav id="tabs"></nav>
+    <div id="tabBody"></div>
+  </aside>
+
+  <div id="hud" hidden>
+    <div id="gauge">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <path class="g-bg" d="M 38 162 A 88 88 0 1 1 162 162" />
+        <path class="g-red" d="M 38 162 A 88 88 0 1 1 162 162" />
+        <path class="g-rpm" id="rpmArc" d="M 38 162 A 88 88 0 1 1 162 162" />
+      </svg>
+      <div class="g-mid"><span id="kmh">0</span><small>กม./ชม.</small></div>
+      <div class="g-gear"><span id="gear">1</span><small id="gearMode">AUTO</small></div>
+      <div id="nosBar" hidden><i></i><span>N2O</span></div>
+    </div>
+    <div class="drivebtns">
+      <button id="btnSound">🔇 เสียง</button>
+      <button id="btnChase" class="on">🎥 กล้องตาม</button>
+      <button id="btnResetCar" title="กลับเข้าถนน (R)">↺ กลับถนน</button>
+    </div>
+  </div>
+  <div id="cityHud" hidden>
+    <canvas id="minimap" width="190" height="190"></canvas>
+    <button id="btnCityMenu" class="mobileonly">☰</button>
+    <div class="cityctl">
+      <div class="row2"><span>🕒 <b id="clock">18:30</b></span><button id="btnTimeAuto" class="on">⏯ เวลาเดิน</button></div>
+      <input type="range" id="timeSlider" min="0" max="24" step="0.05" value="18.5">
+      <div class="row2"><button id="btnSafehouse">🏠 เซฟเฮาส์</button><button id="btnTraffic" class="on">🚗 รถ</button></div>
+      <div class="row2"><button id="btnBloom" class="on">✨ แสงฟุ้ง</button></div>
+    </div>
+  </div>
+  <div id="touch" hidden>
+    <div class="tl"><button data-t="left">◀</button><button data-t="right">▶</button></div>
+    <div class="tr"><button data-t="nos" class="small nos">N2O</button><button data-t="hand" class="small">P</button><button data-t="brake">▼</button><button data-t="gas" class="gas">▲</button></div>
+  </div>
+
+  <div id="raceHud" hidden></div>
+  <div id="raceCount" hidden></div>
+  <div id="raceMsg" hidden></div>
+  <div id="raceResult" hidden></div>
+  <div id="raceSetup" hidden><div class="gfx-card"><div class="gfx-head"><b>🏁 เปิดการแข่งขัน</b><button class="rs-x" aria-label="ปิด">✕</button></div><div class="rs-body"></div></div></div>
+  <div id="fps" hidden></div>
+
+  <div id="worldMap" hidden><div class="wm-card"><div class="gfx-head"><b>🗺️ แผนที่เมือง</b><button class="wm-x" aria-label="ปิด">✕</button></div><canvas id="wmCanvas" width="1100" height="720"></canvas><p id="wmInfo"></p></div></div>
+  <div id="profile" hidden><div class="gfx-card"><div class="gfx-head"><b>👤 นักซิ่ง</b><button class="wm-x" aria-label="ปิด">✕</button></div><div class="pf-body"></div></div></div>
+
+  <div id="rotateHint">📱↻ หมุนจอเป็นแนวนอนเพื่อขับได้ถนัดขึ้น</div>
+  <div id="onlineBox" hidden>
+    <div class="ob-head"><b>🟢 ผู้เล่นในเมืองนี้</b><button class="ob-close" aria-label="ปิด">✕</button></div>
+    <div class="ob-body"></div>
+  </div>
+  <div id="chatLog"></div>
+  <form id="chatForm" hidden><input id="chatIn" maxlength="120" placeholder="พิมพ์คุยกับทุกคนในเมือง… (Enter ส่ง)" autocomplete="off"></form>
+
+  <div id="title">
+    <div class="tt-box">
+      <div class="tt-logo"><span class="logo">VIOS</span><span class="logo2">GARAGE</span></div>
+      <div class="tt-sub">STREET RACING · ONLINE</div>
+      <p class="tt-desc">เมืองเดียว ผู้เล่นทุกคนเจอกันจริง — เก็บเงินตามถนน หาอู่ลับ แต่งรถให้แรง แล้วท้าแข่งชิงเงินรางวัล</p>
+      <label for="ttName">ชื่อนักซิ่ง</label>
+      <input id="ttName" maxlength="16" placeholder="เช่น Digg" autocomplete="nickname">
+      <button id="ttGo" class="tt-go">เข้าสู่ถนน ▶</button>
+      <button id="ttAcc" class="link tt-acc">🔑 มีบัญชีแล้ว? เข้าสู่ระบบ</button>
+      <div id="ttLoginBox" hidden><input id="ttUser" maxlength="16" placeholder="ชื่อผู้ใช้" autocomplete="username"><input id="ttPass" type="password" maxlength="72" placeholder="รหัสผ่าน" autocomplete="current-password"><button id="ttLogin" class="tt-go alt">เข้าสู่ระบบ ▶</button></div>
+      <p id="ttStatus" class="tt-status"></p>
+      <div class="tt-foot"><button id="smGfx" class="link">⚙️ ตั้งค่าการควบคุม/กราฟิก</button></div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <a id="credit" target="_blank" rel="noopener" hidden></a>
+  <div id="loading">กำลังประกอบรถ…</div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
