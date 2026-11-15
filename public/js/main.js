@@ -357,6 +357,7 @@ function loadBots() {
   if (!C) return;
   // phones: fewer distinct models (less to download and keep in memory)
   C.BOTS.loadBotModels(99, build.gen).catch(() => {});
+  C.BOTS.preloadFullCarModels(build.gen).catch(() => {});
 }
 
 function spawnRaw(sp) {
