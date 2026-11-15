@@ -209,7 +209,7 @@ export class Online {
     let build;
     try { build = mergeBuild(peer.build); } catch { build = mergeBuild({}); }
     const gen = GENERATIONS.find((g) => g.id === build.gen);
-    if (gen.glb) await loadTemplate(gen.glb, gen.glbConfig || {}).catch(() => {});
+    if (gen?.glb) await loadTemplate(gen.glb, gen.glbConfig || {}).catch(() => {});
     if (!this.peers.has(peer.id)) return; // left while loading
     if (!peer.car) {
       peer.car = new Car();

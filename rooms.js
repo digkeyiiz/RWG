@@ -265,6 +265,7 @@ function attachRooms(httpServer) {
       if (!w || typeof cb !== 'function') return;
       const P = await plc, E = await eco;
       if (d.id === null) { p.garage = null; return cb({ ok: true }); }
+      if (d.id === 'showroom') { p.garage = 'showroom'; return cb({ ok: true, bonus: 0, me: me(p) }); }
       const g = P.garageById(d.id);
       if (!g) return cb({ ok: false });
       if (!p.pose || Date.now() - p.pose.t > 3000 || Math.hypot(p.pose.x - g.x, p.pose.z - g.z) > (g.onTouge ? 30 : 22)) return cb({ ok: false, err: 'ไม่ได้อยู่ที่อู่' });

@@ -18,10 +18,11 @@ import { GARAGES } from './places.js';
 
 // a stock build of a car, with that car's factory tyre size
 function freshBuild(genId) {
-  const g = GENERATIONS.find((x) => x.id === genId && x.glb) || GENERATIONS.find((x) => x.id === DEFAULT_BUILD.gen);
+  const g = GENERATIONS.find((x) => x.id === genId) || GENERATIONS.find((x) => x.id === DEFAULT_BUILD.gen);
   const b = mergeBuild({ ...JSON.parse(JSON.stringify(DEFAULT_BUILD)), gen: g.id, name: g.name });
   b.wheels.rim = g.tire.rim; b.wheels.tireWidth = g.tire.width; b.wheels.aspect = g.tire.aspect;
-  b.wheels.rimWidth = g.tire.rim >= 16 ? 6 : 5.5; b.wheels.offset = g.tire.rim >= 16 ? 39 : 45;
+  b.wheels.rimWidth = g.tire.rim >= 18 ? 8.5 : g.tire.rim >= 17 ? 7.5 : g.tire.rim >= 16 ? 6 : 5.5;
+  b.wheels.offset = g.tire.rim >= 17 ? 32 : g.tire.rim >= 16 ? 39 : 45;
   return b;
 }
 const garage = new Garage(mergeBuild, freshBuild);
@@ -460,6 +461,8 @@ async function setMode(m, spawn = null) {
     sun.position.set(4, 8, 3); sun.target.position.set(0, 0, 0);
     const [p, t] = presets.front34(); camera.position.copy(p); controls.target.copy(t);
   }
+  if (m === 'garage') online?.garage(inGarage?.id || 'showroom');
+  else if (!inGarage) online?.garage(null);
   syncInset();
 }
 // in the garage the tuning panel covers the left of the screen: shift the view so the car sits in the free area
