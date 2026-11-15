@@ -62,8 +62,8 @@ export class Weather {
       this.wet += (wantWet - this.wet) * Math.min(1, dt * 1.5);
       const w = this.wet;
       if (city?.M) {
-        if (city.M.asphalt) { city.M.asphalt.roughness = 0.9 - w * 0.62; city.M.asphalt.metalness = w * 0.35; }
-        if (city.M.deckTop) { city.M.deckTop.roughness = 0.88 - w * 0.6; city.M.deckTop.metalness = w * 0.35; }
+        if (city.M.asphalt) { city.M.asphalt.roughness = 0.9 - w * 0.78; city.M.asphalt.metalness = w * 0.3; }
+        if (city.M.deckTop) { city.M.deckTop.roughness = 0.88 - w * 0.76; city.M.deckTop.metalness = w * 0.3; }
         if (city.M.paving) { city.M.paving.roughness = 0.9 - w * 0.52; city.M.paving.metalness = w * 0.25; }
       }
     }

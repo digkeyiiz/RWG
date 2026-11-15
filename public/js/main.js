@@ -443,6 +443,7 @@ function frame(now) {
     if (timeAuto) { hour = (hour + dt / 60) % 24; document.getElementById('timeSlider').value = hour; }
     night = C.sky.apply(hour, world, VIEW[gfx.get('view')].fog);
     C.weather.update(dt, car.root.position, driver.vel, C.city, C.sky, VIEW[gfx.get('view')].fog);
+    C.sky.updateEnv(renderer, hour, C.weather.wet);
     car.setAutoLights(night > 0.55);
     C.city.update(dt, night);
     if (trafficActive()) C.traffic.update(dt, { x: driver.pos.x, z: driver.pos.z, y: driver.y || 0 }, night);

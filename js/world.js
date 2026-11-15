@@ -150,6 +150,7 @@ export function createWorld(canvas, opts = {}) {
       sun.intensity = drive ? 2.8 : 2.2;
       renderer.toneMappingExposure = 1.0;
       if ('environmentIntensity' in scene) scene.environmentIntensity = 1;
+      scene.environment = envTex;
     }
     const sc = sun.shadow.camera, ext = city ? 70 : 5;
     sc.left = -ext; sc.right = ext; sc.top = ext; sc.bottom = -ext; sc.far = city ? 300 : 25; sc.updateProjectionMatrix();
