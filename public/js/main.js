@@ -235,13 +235,17 @@ let mode = 'garage';
 let chase = true;
 const hud = document.getElementById('hud');
 const touchEl = document.getElementById('touch');
-let isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-addEventListener('touchstart', () => {
+const coarseMQ = matchMedia('(pointer: coarse)');
+let isTouch = coarseMQ.matches || 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const activateTouch = () => {
   if (!isTouch) {
     isTouch = true;
     if (mode === 'city' || mode === 'drive') touchEl.hidden = false;
   }
-}, { passive: true });
+};
+coarseMQ.addEventListener?.('change', (e) => { if (e.matches) activateTouch(); });
+addEventListener('touchstart', activateTouch, { passive: true });
+addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') activateTouch(); }, { passive: true });
 const cityHud = document.getElementById('cityHud');
 document.getElementById('btnCityMenu').onclick = () => cityHud.classList.toggle('open');
 let C = null; // city context (lazy)
@@ -633,6 +637,7 @@ if (joyEl) {
   };
   joyEl.addEventListener('touchstart', (e) => {
     e.preventDefault();
+    if (joyTid !== null && !findTouch(e.touches, joyTid)) resetJoy();
     if (joyTid !== null || !e.changedTouches.length) return;
     const t = e.changedTouches[0];
     joyTid = t.identifier;

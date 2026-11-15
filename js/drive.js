@@ -89,11 +89,11 @@ export class Driver {
     const speed = Math.abs(vf);
     // steering gets lighter at speed, but keeps enough authority for crisp lane changes
     const sens = this.ctl.steer;
-    const maxSteer = Math.max(0.16, (0.65 / (1 + speed * 0.042 / sens)) * Math.min(1.15, sens));
+    const maxSteer = Math.max(0.22, (0.68 / (1 + speed * 0.026 / sens)) * Math.min(1.2, sens));
     const analog = inp.steer !== null;
     const target = (analog ? -inp.steer : inp.left - inp.right) * maxSteer;
     // keyboard steering ramps in (faster when centring), analog follows the stick closely
-    const rate = analog ? 20 : (Math.abs(target) < Math.abs(this.steer) ? 11 : 7) * sens;
+    const rate = analog ? 22 : (Math.abs(target) < Math.abs(this.steer) ? 12 : 8.5) * sens;
     this.steer += (target - this.steer) * Math.min(1, dt * rate);
     // ================= vehicle dynamics: two-axle model with slip-angle tyre forces =================
     // tyre peak friction μ from brand, compound, width, camber, shock setup, widebody and surface
@@ -181,38 +181,40 @@ export class Driver {
       const spinF = Math.max(0, Math.abs(FxF) / capDF - 1), spinR = Math.max(0, Math.abs(FxR) / capDR - 1);
       spinMax = Math.max(spinMax, split[0] ? spinF : 0, split[1] ? spinR : 0);
       FxF = THREE.MathUtils.clamp(FxF, -capDF, capDF); FxR = THREE.MathUtils.clamp(FxR, -capDR, capDR);
-      // a wheel that spins or locks has much less sideways grip left (friction circle)
-      const latF = Math.sqrt(Math.max(0.04, 1 - (FxF / capF) ** 2)) / (1 + spinF * 2);
-      const latR = Math.sqrt(Math.max(0.04, 1 - (FxR / capR) ** 2)) / (1 + spinR * 2.5) * (inp.hand && Math.abs(vx) > 1 ? 0.3 : 1);
-      // slip angles
-      const vxs = Math.max(Math.abs(vx), 3);
-      const af = Math.atan2(vy + a_ * r, vxs) - delta;
-      const ar = Math.atan2(vy - b_ * r, vxs);
-      const FyF = -MF(af, capF, 8.6) * latF, FyR = -MF(ar, capR, 11.5) * latR;
-      slipMax = Math.max(slipMax, Math.abs(af) * (spinF > 0 ? 1.5 : 1), Math.abs(ar) * (1 + spinR));
-      const cd = Math.cos(delta), sd = Math.sin(delta);
-      Fx = FxF * cd - FyF * sd + FxR - drag * sgn;
-      const Fy = FxF * sd + FyF * cd + FyR;
-      const Mz = a_ * (FxF * sd + FyF * cd) - b_ * FyR;
-      this.latA = Fy / m;
       if (vx > 3.5) {
+        // a wheel that spins or locks has less sideways grip left (friction circle, tuned for responsive cornering)
+        const latF = Math.sqrt(Math.max(0.18, 1 - 0.55 * (FxF / capF) ** 2)) / (1 + spinF * 1.4);
+        const latR = Math.sqrt(Math.max(0.16, 1 - 0.6 * (FxR / capR) ** 2)) / (1 + spinR * 2.0) * (inp.hand && Math.abs(vx) > 1 ? 0.3 : 1);
+        // slip angles
+        const vxs = Math.max(Math.abs(vx), 3.5);
+        const af = Math.atan2(vy + a_ * r, vxs) - delta;
+        const ar = Math.atan2(vy - b_ * r, vxs);
+        const FyF = -MF(af, capF, 9.2) * latF, FyR = -MF(ar, capR, 11.2) * latR;
+        slipMax = Math.max(slipMax, Math.abs(af) * (spinF > 0 ? 1.5 : 1), Math.abs(ar) * (1 + spinR));
+        const cd = Math.cos(delta), sd = Math.sin(delta);
+        Fx = FxF * cd - FyF * sd + FxR - drag * sgn;
+        const Fy = FxF * sd + FyF * cd + FyR;
+        const Mz = a_ * (FxF * sd + FyF * cd) - b_ * FyR;
+        this.latA = Fy / m;
         vx += (Fx / m + vy * r) * h;
         vy += (Fy / m - vx * r) * h;
         r += (Mz / Iz) * h;
-        // stability control (assist): when the car rotates faster than the tyres can sustain
-        // (oversteer), trim the yaw rate and the sideways slide — never adds rotation
+        // stability control (assist): trim excessive oversteer without killing cornering agility
         if (!inp.hand && assist > 0) {
-          const rMax = (muR * g * 1.05) / vx;
-          if (Math.abs(r) > rMax) r -= (r - Math.sign(r) * rMax) * Math.min(1, assist * 6 * h);
-          const beta = Math.atan2(vy, vx), bMax = 0.07 + (1 - assist) * 0.25;
+          const rMax = (muR * g * 1.32) / vx;
+          if (Math.abs(r) > rMax) r -= (r - Math.sign(r) * rMax) * Math.min(1, assist * 5 * h);
+          const beta = Math.atan2(vy, vx), bMax = 0.14 + (1 - assist) * 0.28;
           if (Math.abs(beta) > bMax) vy -= (vy - Math.sign(vy) * Math.tan(bMax) * vx) * Math.min(1, assist * 3 * h);
         }
       } else {
-        // slow / reversing: kinematic bicycle (tyres can't slide meaningfully)
+        // slow / reversing: kinematic bicycle (no phantom Pacejka drag stalling acceleration from standstill)
+        const scrub = Math.abs(delta) * 0.08 * Math.abs(FxF + FxR);
+        Fx = FxF + FxR - drag * sgn - scrub * sgn;
+        this.latA = vx * r;
         vx += (Fx / m) * h;
         if (reverse) vx = Math.max(vx, -8);
         const kin = (vx / WB) * Math.tan(delta);
-        r += (kin - r) * Math.min(1, h * 20);
+        r += (kin - r) * Math.min(1, h * 24);
         vy *= 1 - Math.min(1, h * 12);
       }
       this.heading += r * h;

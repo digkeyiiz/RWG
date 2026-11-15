@@ -837,5 +837,14 @@ body.garage #wallet {
   .joy { width: 128px; height: 128px; }
   .joy-knob { width: 52px; height: 52px; margin: -26px 0 0 -26px; }
 }
+@media (max-width: 520px) {
+  #touch { padding: 10px 10px max(12px, env(safe-area-inset-bottom)); gap: 8px; align-items: flex-end; }
+  #touch .tr { flex-wrap: wrap; justify-content: flex-end; max-width: 196px; gap: 8px; }
+  #touch button { width: 60px; height: 60px; font-size: 20px; }
+  #touch button.gas { width: 72px; height: 72px; font-size: 22px; }
+  #touch button.small { width: 46px; height: 46px; font-size: 14px; }
+  .joy { width: 122px; height: 122px; }
+  .joy-knob { width: 48px; height: 48px; margin: -24px 0 0 -24px; }
+}
 
 
