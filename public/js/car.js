@@ -848,6 +848,22 @@ export class Car {
   }
 
   setAutoLights(on) { if (!!this.autoLights === on) return; this.autoLights = on; this.applyLights(); }
+  setDriveLights(braking) {
+    const b = !!braking;
+    if (this._braking === b) return;
+    this._braking = b;
+    const on = this.b?.lights?.head || !!this.autoLights;
+    this.m.tail.emissiveIntensity = b ? 2.4 : (on ? 0.9 : 0.08);
+    this.m.tailInner.emissiveIntensity = b ? 4.5 : (on ? 2.5 : 0.25);
+    if (this.glbMats) {
+      for (const tm of this.glbMats.tail) {
+        tm.emissive.set('#ff1a1a');
+        tm.emissiveMap = tm.map;
+        tm.emissiveIntensity = b ? 2.6 : (on ? 0.9 : 0);
+        tm.needsUpdate = true;
+      }
+    }
+  }
 
   // ---------------- runtime ----------------
   // steer: radians (+ = left), spinDelta: radians, roll/pitch: radians
