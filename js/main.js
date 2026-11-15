@@ -237,11 +237,11 @@ async function ensureCity() {
   ld.textContent = 'กำลังสร้างเมือง…'; ld.classList.remove('hide');
   await new Promise((r) => setTimeout(r, 30));
   await document.fonts.load('700 40px Kanit', 'ทางด่วนดินแดงพระราม9หยุด').catch(() => {});
-  let Touge, BOTS, Weather;
-  const [{ City }, { Traffic }, { Sky }, { Minimap }, , , , { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
+  let Touge, BOTS, Weather, makeGradePass;
+  const [{ City }, { Traffic }, { Sky }, { Minimap }, , , , , { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
     import('./city/city.js'), import('./city/traffic.js'), import('./city/sky.js'), import('./city/minimap.js'),
     import('./city/touge.js').then((m) => { Touge = m.Touge; }), import('./city/botcars.js').then((m) => { BOTS = m; }),
-    import('./city/weather.js').then((m) => { Weather = m.Weather; }),
+    import('./city/weather.js').then((m) => { Weather = m.Weather; }), import('./city/grade.js').then((m) => { makeGradePass = m.makeGradePass; }),
     import('three/addons/postprocessing/EffectComposer.js'), import('three/addons/postprocessing/RenderPass.js'),
     import('three/addons/postprocessing/UnrealBloomPass.js'), import('three/addons/postprocessing/OutputPass.js'),
   ]);
@@ -262,11 +262,13 @@ async function ensureCity() {
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.45, 0.85);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  const grade = makeGradePass();
+  composer.addPass(grade);
   const weather = new Weather(scene);
   weather.setMode(gfx.get('weather'));
   weather.setQuality(gfx.get('preset'));
   console.log('city built in', Math.round(performance.now() - t0), 'ms');
-  C = { city, touge, traffic: null, Traffic, BOTS, sky, weather, minimap, composer, bloom };
+  C = { city, touge, traffic: null, Traffic, BOTS, sky, weather, minimap, composer, bloom, grade };
   rebuildTraffic();
   race.setWorld(city, touge);
   game.buildMarkers(race.tracks, touge);
@@ -507,7 +509,7 @@ function frame(now) {
   }
   online.update(dt, mode, night);
   controls.update(dt);
-  if (mode === 'city' && C && gfx.get('bloom')) { C.bloom.strength = 0.12 + night * 0.38; C.bloom.threshold = 0.92; C.bloom.radius = 0.35; C.composer.render(dt); }
+  if (mode === 'city' && C && gfx.get('bloom')) { C.bloom.strength = 0.12 + night * 0.38; C.bloom.threshold = 0.92; C.bloom.radius = 0.35; C.grade.setState({ time: performance.now() / 1000, night, wet: C.weather.wet, speed: driver.vel.length() / 80 }); C.composer.render(dt); }
   else renderer.render(scene, camera);
 }
 requestAnimationFrame(frame);

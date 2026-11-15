@@ -17,15 +17,25 @@ const KEYS = [ // hour, top, horizon, sun color, sun intensity, hemi intensity, 
 export class Sky {
   constructor(scene) {
     this.scene = scene;
-    this.uniforms = { top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() }, night: { value: 0 } };
+    this.uniforms = { top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() }, night: { value: 0 }, time: { value: 0 }, cover: { value: 0.5 } };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.uniforms, side: THREE.BackSide, depthWrite: false, fog: false,
       vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = modelViewMatrix * vec4(position,1.0); gl_Position = projectionMatrix * p; gl_Position.z = gl_Position.w; }',
-      fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunCol; uniform float night; varying vec3 vDir;
+      fragmentShader: `uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunCol; uniform float night; uniform float time; uniform float cover; varying vec3 vDir;
+        float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+        float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h2(i),h2(i+vec2(1,0)),f.x), mix(h2(i+vec2(0,1)),h2(i+vec2(1,1)),f.x), f.y); }
+        float fbm(vec2 p){ float a = 0.5, s = 0.0; for(int k=0;k<5;k++){ s += a*vn(p); p = p*2.03+vec2(11.3,7.7); a *= 0.5; } return s; }
         void main(){ float h = max(vDir.y, 0.0); vec3 c = mix(horizon, top, pow(h, 0.55));
           if (vDir.y < 0.0) c = horizon * 0.8;
           float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
           c += sunCol * (pow(s, 600.0) * 2.5 + pow(s, 8.0) * 0.25) * (1.0 - night * 0.6);
+          if (vDir.y > 0.02) {
+            vec2 cp = vDir.xz / (vDir.y + 0.18) * 1.6 + vec2(time * 0.006, time * 0.002);
+            float d = smoothstep(0.55 - cover * 0.25, 0.85, fbm(cp));
+            float lit = 0.55 + 0.45 * smoothstep(0.35, 0.9, fbm(cp + normalize(sunDir.xz + 0.001) * 0.12));
+            vec3 cc = mix(horizon * 0.9, vec3(1.0), 0.65) * lit * (1.0 - night * 0.93) + sunCol * pow(s, 6.0) * 0.4 * (1.0 - night);
+            c = mix(c, cc, d * smoothstep(0.02, 0.22, vDir.y) * (1.0 - night * 0.55));
+          }
           gl_FragColor = vec4(c, 1.0); }`,
     });
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), mat);
@@ -73,6 +83,7 @@ export class Sky {
     const night = THREE.MathUtils.clamp(1 - (si - 0.2) / 1.4, 0, 1);
     this.night = night;
     this.uniforms.night.value = night;
+    this.uniforms.time.value = performance.now() / 1000;
     this.starMat.opacity = Math.max(0, night - 0.3) * 1.2;
     sun.color.copy(sc); sun.intensity = si;
     hemi.intensity = hi;
