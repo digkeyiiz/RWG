@@ -1,5 +1,6 @@
 // Weather system: rain streaks around the car + wet road surface reflections + rain fog adjustment.
 import * as THREE from 'three';
+import { wetUniform, timeUniform } from './pbr.js';
 
 const MAX_DROPS = 1400;
 const BOX_XZ = 46;
