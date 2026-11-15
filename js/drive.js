@@ -66,6 +66,8 @@ export class Driver {
     const gp = this.pad();
     if (this.frozen) return { gas: 0, brake: 1, left: 0, right: 0, hand: 0, steer: null };
     const k = this.keys, t = this.touch;
+    const padSteer = gp && Math.abs(gp.steer) > 0.02 ? gp.steer : null;
+    const touchSteer = Math.abs(t.steer) > 0.02 ? t.steer : null;
     return {
       gas: Math.max(k.KeyW || k.ArrowUp ? 1 : 0, t.gas, gp?.gas || 0),
       brake: Math.max(k.KeyS || k.ArrowDown ? 1 : 0, t.brake, gp?.brake || 0),
@@ -73,7 +75,7 @@ export class Driver {
       right: Math.max(k.KeyD || k.ArrowRight ? 1 : 0, t.right),
       hand: Math.max(k.Space ? 1 : 0, t.hand, gp?.hand || 0),
       nos: k.KeyN || t.nos || gp?.nos ? 1 : 0,
-      steer: gp && Math.abs(gp.steer) > 0.02 ? gp.steer : null, // analog: -1 left … +1 right
+      steer: padSteer ?? touchSteer, // analog: -1 left … +1 right
     };
   }
 

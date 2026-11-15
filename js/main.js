@@ -529,10 +529,69 @@ document.getElementById('btnResetCar').onclick = () => {
 };
 touchEl.querySelectorAll('button').forEach((b) => {
   const k = b.dataset.t;
-  const on = (e) => { e.preventDefault(); driver.touch[k] = 1; b.classList.add('press'); };
-  const off = (e) => { e.preventDefault(); driver.touch[k] = 0; b.classList.remove('press'); };
-  b.addEventListener('pointerdown', on); b.addEventListener('pointerup', off); b.addEventListener('pointerleave', off); b.addEventListener('pointercancel', off);
+  const on = (e) => {
+    e.preventDefault();
+    try { b.setPointerCapture(e.pointerId); } catch {}
+    driver.touch[k] = 1; b.classList.add('press');
+  };
+  const off = (e) => {
+    e.preventDefault();
+    driver.touch[k] = 0; b.classList.remove('press');
+  };
+  b.addEventListener('pointerdown', on);
+  b.addEventListener('pointerup', off);
+  b.addEventListener('pointercancel', off);
+  b.addEventListener('lostpointercapture', off);
 });
+
+// Analog Virtual Steering Joystick (multi-touch safe via pointerId + setPointerCapture)
+const joyEl = document.getElementById('joySteer');
+if (joyEl) {
+  const knob = joyEl.querySelector('.joy-knob');
+  let joyPid = null, joyCx = 0, joyCy = 0, joyMaxR = 52;
+  const updateJoy = (cx, cy) => {
+    let dx = cx - joyCx, dy = cy - joyCy;
+    const dist = Math.hypot(dx, dy);
+    if (dist > joyMaxR) { const s = joyMaxR / dist; dx *= s; dy *= s; }
+    knob.style.transform = `translate3d(${dx.toFixed(1)}px, ${(dy * 0.45).toFixed(1)}px, 0)`;
+    const nx = Math.max(-1, Math.min(1, dx / joyMaxR));
+    if (Math.abs(nx) < 0.05) {
+      driver.touch.steer = 0;
+    } else {
+      const mag = (Math.abs(nx) - 0.05) / 0.95;
+      // Smooth non-linear curve: precise straight-line control + full lock in tight corners
+      driver.touch.steer = Math.sign(nx) * (mag * 0.65 + mag * mag * 0.35);
+    }
+  };
+  const resetJoy = (e) => {
+    if (e && joyPid !== null && e.pointerId !== joyPid) return;
+    joyPid = null;
+    driver.touch.steer = 0;
+    joyEl.classList.remove('active');
+    knob.style.transform = 'translate3d(0px, 0px, 0)';
+  };
+  joyEl.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (joyPid !== null) return;
+    joyPid = e.pointerId;
+    try { joyEl.setPointerCapture(e.pointerId); } catch {}
+    const rect = joyEl.getBoundingClientRect();
+    joyCx = rect.left + rect.width / 2;
+    joyCy = rect.top + rect.height / 2;
+    joyMaxR = Math.max(36, rect.width * 0.36);
+    joyEl.classList.add('active');
+    updateJoy(e.clientX, e.clientY);
+  });
+  joyEl.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== joyPid) return;
+    e.preventDefault();
+    updateJoy(e.clientX, e.clientY);
+  });
+  joyEl.addEventListener('pointerup', resetJoy);
+  joyEl.addEventListener('pointercancel', resetJoy);
+  joyEl.addEventListener('lostpointercapture', resetJoy);
+  addEventListener('blur', () => resetJoy());
+}
 
 // ---------- loop ----------
 const kmhEl = document.getElementById('kmh'), gearEl = document.getElementById('gear'), rpmArc = document.getElementById('rpmArc');
