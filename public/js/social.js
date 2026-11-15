@@ -66,8 +66,12 @@ export class Social {
   render() {
     this.el.querySelectorAll('.so-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === this.tab));
     const me = this.online.me;
-    if (!me) { this.body.innerHTML = '<p class="ob-note">กำลังเชื่อมต่อ…</p>'; return; }
-    if (this.tab === 'account') return this.renderAccount(me);
+    if (this.tab === 'account') return this.renderAccount(me || { name: this.online.name || 'นักซิ่ง', rep: 0, likes: 0 });
+    if (!me) {
+      this.body.innerHTML = '<p class="ob-note">กำลังเชื่อมต่อเซิร์ฟเวอร์ในพื้นหลัง… คุณสามารถเข้าสู่ระบบหรือสมัครบัญชีได้ทันที</p><button class="on wide" data-go="account">🔑 เชื่อมต่อ / เข้าสู่ระบบ</button>';
+      this.body.querySelector('[data-go]').onclick = () => { this.tab = 'account'; this.render(); };
+      return;
+    }
     if (!me.username) {
       this.body.innerHTML = `<p class="ob-note">ตั้งชื่อผู้ใช้ก่อนเพื่อเพิ่มเพื่อน ปาร์ตี้ และวาร์ปหาเพื่อน — ความคืบหน้าทั้งหมด (เงิน รถ) ย้ายเข้าบัญชีนี้</p><button class="on wide" data-go="account">🔑 สมัครชื่อผู้ใช้</button>`;
       this.body.querySelector('[data-go]').onclick = () => { this.tab = 'account'; this.render(); };

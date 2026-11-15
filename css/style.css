@@ -770,7 +770,8 @@ body.garage #wallet {
 }
 
 /* Virtual Analog Steering Joystick */
-#touch { z-index: 5; }
+#touch[hidden] { display: none !important; }
+#touch { z-index: 10; }
 #touch .tl, #touch .tr { touch-action: none; }
 .joy {
   position: relative;
@@ -803,6 +804,12 @@ body.garage #wallet {
   font-size: 13px;
   color: rgba(255, 255, 255, 0.35);
   pointer-events: none;
+}
+.joy.left .joy-arrows span:first-child,
+.joy.right .joy-arrows span:last-child {
+  color: #6be4ff;
+  text-shadow: 0 0 10px #4cc3ff;
+  transform: scale(1.25);
 }
 .joy-knob {
   position: absolute;

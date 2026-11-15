@@ -1,13 +1,13 @@
 // Arcade driving model + input + synthesized engine sound.
 import * as THREE from 'three';
-import { TIRE_BRANDS } from './catalog.js';
+import { TIRE_BRANDS, SHOCK_TYPES, WHEEL_BRANDS } from './catalog.js';
 import { rpmFor, driveForce, dragAccel, WHEEL_R } from './engine.js';
 
 export class Driver {
   constructor(car, world) {
     this.car = car; this.world = world;
     this.keys = {};
-    this.touch = { gas: 0, brake: 0, left: 0, right: 0, hand: 0, nos: 0 };
+    this.touch = { gas: 0, brake: 0, left: 0, right: 0, hand: 0, nos: 0, steer: 0 };
     this.reset();
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -67,7 +67,7 @@ export class Driver {
     if (this.frozen) return { gas: 0, brake: 1, left: 0, right: 0, hand: 0, steer: null };
     const k = this.keys, t = this.touch;
     const padSteer = gp && Math.abs(gp.steer) > 0.02 ? gp.steer : null;
-    const touchSteer = Math.abs(t.steer) > 0.02 ? t.steer : null;
+    const touchSteer = Math.abs(t.steer || 0) > 0.02 ? t.steer : null;
     return {
       gas: Math.max(k.KeyW || k.ArrowUp ? 1 : 0, t.gas, gp?.gas || 0),
       brake: Math.max(k.KeyS || k.ArrowDown ? 1 : 0, t.brake, gp?.brake || 0),
@@ -87,30 +87,39 @@ export class Driver {
     const l = new THREE.Vector3(-Math.sin(this.heading), 0, -Math.cos(this.heading)); // left
     let vf = this.vel.dot(f), vl = this.vel.dot(l);
     const speed = Math.abs(vf);
-    // steering gets lighter at speed
+    // steering gets lighter at speed, but keeps enough authority for crisp lane changes
     const sens = this.ctl.steer;
-    const maxSteer = (0.6 / (1 + speed * 0.055 / sens)) * Math.min(1.15, sens);
+    const maxSteer = Math.max(0.16, (0.65 / (1 + speed * 0.042 / sens)) * Math.min(1.15, sens));
     const analog = inp.steer !== null;
     const target = (analog ? -inp.steer : inp.left - inp.right) * maxSteer;
     // keyboard steering ramps in (faster when centring), analog follows the stick closely
-    const rate = analog ? 16 : (Math.abs(target) < Math.abs(this.steer) ? 10 : 6) * sens;
+    const rate = analog ? 20 : (Math.abs(target) < Math.abs(this.steer) ? 11 : 7) * sens;
     this.steer += (target - this.steer) * Math.min(1, dt * rate);
     // ================= vehicle dynamics: two-axle model with slip-angle tyre forces =================
-    // tyre peak friction μ from brand, compound and width (and the surface under the car)
+    // tyre peak friction μ from brand, compound, width, camber, shock setup, widebody and surface
     const w = this.car.b.wheels;
     const tb = TIRE_BRANDS.find((t) => t.id === w.tireBrand) || TIRE_BRANDS[0];
+    const wb = WHEEL_BRANDS.find((b) => b.id === w.brand) || WHEEL_BRANDS[0];
     const typeGrip = { comfort: 1.0, sport: 1.1, directional: 1.08, semislick: 1.25 }[w.tireType] || 1;
-    const widthGrip = 1 + (w.tireWidth - 185) / 400;
+    const widthGrip = 1 + (w.tireWidth - 185) / 380;
+    const cam = Math.abs(w.camber || 0);
+    // -1° to -3.5° negative camber boosts cornering grip; extreme stance (>4.5°) trades grip for drift slip
+    const camberLat = cam <= 3.5 ? 1 + cam * 0.018 : Math.max(0.86, 1.063 - (cam - 3.5) * 0.032);
+    const camberLong = cam <= 3 ? 1 : Math.max(0.88, 1 - (cam - 3) * 0.018);
+    const susp = this.car.b.suspension;
+    const shock = SHOCK_TYPES.find((s) => s.id === susp.type) || SHOCK_TYPES[0];
+    const shockGrip = { oem: 1, lowering: 1.02, coilover: 1.05, air: 0.99 }[shock.id] || 1;
+    const kit = this.car.b.kit || {};
+    const wideGrip = kit.fender === 'wide' ? 1.04 : kit.fender === 'overfender' ? 1.025 : 1;
     const surf = this.env?.surfaceMu ? this.env.surfaceMu(this.pos.x, this.pos.z, this.y) : 1;
-    const mu = tb.grip * typeGrip * widthGrip * surf;
+    const mu = tb.grip * typeGrip * widthGrip * camberLat * shockGrip * wideGrip * surf;
     this.grip = mu; this.surface = surf;
     const pf = this.perf, R = this.car.tire?.outerR || WHEEL_R;
     const drv = pf?.drive || 'FF';
-    const m = pf?.mass || 1100, WB = P.gen.dims.WB, g = 9.81;
+    const m = Math.max(780, (pf?.mass || 1100) + (wb.kg || 0)), WB = P.gen.dims.WB, g = 9.81;
     const frontShare = { FF: 0.61, FR: 0.53, AWD: 0.58 }[drv] ?? 0.6;
     const a_ = WB * (1 - frontShare), b_ = WB * frontShare; // CG → front axle, CG → rear axle
-    const susp = this.car.b.suspension;
-    const hcg = 0.53 - (susp.drop || 0) / 1000;
+    const hcg = Math.max(0.38, 0.53 - (susp.drop || 0) / 1000);
     const Iz = m * a_ * b_ * 1.12;
     const assist = this.ctl.assist;
     const delta = this.steer;
@@ -130,15 +139,19 @@ export class Driver {
       if (inp.gas && vf < -0.5) Fbrake = 9 * m; // gas while rolling backwards = brake
       else if (inp.gas && !limiter) Fdrive = driveForce(pf, Math.max(0, vf), this.gi, thr, 50, R).a * m;
       if (!inp.gas && vf > 0.5) Fdrive -= m * (0.35 + (rpmNow / pf.redline) * 0.6); // engine braking
-      // nitrous adds power (P = F·v) while held; the tank lasts ~6 s and refills slowly
+      // nitrous adds power (P = F·v) while held; the tank lasts ~6 s and refills smoothly
       this.nos = this.nos ?? 1;
       this.nosOn = !!(inp.nos && pf.nos && this.nos > 0.01 && inp.gas && vf > 2);
       if (this.nosOn) { Fdrive += (pf.peakHp * pf.nos * 745.7) / Math.max(vf, 12); this.nos = Math.max(0, this.nos - dt / 6); }
-      else if (pf.nos) this.nos = Math.min(1, this.nos + dt / 35);
+      else if (pf.nos) this.nos = Math.min(1, this.nos + dt / 20);
     } else if (inp.gas) Fdrive = m * 3.4 * (1 - Math.min(1, speed / 52));
     if (inp.brake) { if (vf > 0.5) Fbrake = 9.6 * m * (pf?.brake || 1); else { reverse = true; Fdrive = -m * 2.8 * (1 - Math.min(1, speed / 12)); } }
     const drag = pf ? m * dragAccel(pf, speed) : m * (0.012 * speed * speed + 0.25);
-    const cl = 0.12 + (this.car.b.kit?.spoiler && this.car.b.kit.spoiler !== 'none' ? 0.12 : 0); // a wing adds a little downforce
+    const cl = 0.12
+      + (kit.front === 'splitter' ? 0.08 : kit.front && kit.front !== 'none' ? 0.04 : 0)
+      + (kit.canard ? 0.04 : 0)
+      + (kit.rear === 'diffuser' ? 0.07 : kit.rear && kit.rear !== 'none' ? 0.03 : 0)
+      + (kit.spoiler === 'gt' || kit.spoiler === 'wing' ? 0.18 : kit.spoiler && kit.spoiler !== 'none' ? 0.08 : 0);
     // ---- integrate in small sub-steps (tyre forces are stiff) ----
     let vx = vf, vy = vl, r = this.r ?? 0;
     const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
@@ -154,7 +167,7 @@ export class Driver {
       // load sensitivity: a heavily loaded axle gets a little less grip per kg
       const muF = mu * (1.06 - 0.06 * Fzf / (m * g * 0.5)) * (pf?.lat || 1);
       const muR = mu * (1.06 - 0.06 * Fzr / (m * g * 0.5)) * (pf?.lat || 1);
-      let capF = muF * Fzf, capR = muR * Fzr;
+      let capF = muF * Fzf * camberLong, capR = muR * Fzr * camberLong;
       // longitudinal forces per axle
       const split = drv === 'FF' ? [1, 0] : drv === 'FR' ? [0, 1] : [0.42, 0.58];
       const dif = 0.9 * (pf?.lsd || 1); // open diff wastes the inside wheel; an LSD gets more down
@@ -252,8 +265,11 @@ export class Driver {
     this.prevVf = vf;
     const latA = vf * yawRate;
     const sus = this.car.b.suspension;
-    const k = 18 + sus.spring * 14;                   // spring stiffness (spring rate kg/mm)
-    const c = 2 + sus.damping * 0.55;                 // damping (clicks)
+    const sh = SHOCK_TYPES.find((s) => s.id === sus.type) || SHOCK_TYPES[0];
+    const spring = sus.spring ?? sh.spring;
+    const damping = sus.damping ?? sh.damping;
+    const k = 18 + spring * 14;                       // spring stiffness (spring rate kg/mm)
+    const c = 2 + damping * 0.55;                     // damping (clicks)
     const lowCg = 1 - (sus.drop || 0) / 400;          // lower car = less roll
     const soft = (tb.comfort || 1) * lowCg;
     const rollT = THREE.MathUtils.clamp(latA * 0.45 * soft * (pf?.roll ?? 1) / k, -0.08, 0.08);
@@ -263,7 +279,7 @@ export class Driver {
     this.pitchV += (k * (pitchT - this.pitch) - c * this.pitchV) * dt;
     this.pitch += this.pitchV * dt;
     // small road texture bumps → heave
-    const bump = speed > 1 ? (Math.sin(this.pos.x * 1.7) * Math.sin(this.pos.z * 1.3)) * 0.004 * Math.min(1, speed / 20) / Math.sqrt(sus.spring / 2.5) : 0;
+    const bump = speed > 1 ? (Math.sin(this.pos.x * 1.7) * Math.sin(this.pos.z * 1.3)) * 0.004 * Math.min(1, speed / 20) / Math.sqrt(spring / 2.5) : 0;
     this.heaveV += (k * (bump - this.heave) - c * this.heaveV) * dt;
     this.heave += this.heaveV * dt;
     this.car._heave = this.heave;

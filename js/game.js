@@ -78,10 +78,11 @@ export class GameWorld {
   updateWallet(delta = 0) {
     const m = this.online.me;
     const w = this.$('wallet');
-    if (!m) { w.hidden = true; return; }
     w.hidden = false;
-    w.querySelector('.money').textContent = baht(m.money);
-    w.querySelector('.rep').textContent = `${m.rep.toLocaleString()} REP`;
+    const money = m ? m.money : (this.hooks.localMoney?.() ?? 999999999);
+    const rep = m ? m.rep : 0;
+    w.querySelector('.money').textContent = baht(money);
+    w.querySelector('.rep').textContent = `${rep.toLocaleString()} REP`;
     if (delta) { w.classList.remove('gain'); void w.offsetWidth; w.classList.add('gain'); }
     this.$('onlineCount').textContent = `${this.online.peers.size + 1}`;
   }

@@ -167,7 +167,26 @@ const race = new Race({
   },
 });
 race.econ = ECON;
-online.claim = () => [...new Set(garage.list().flatMap((b) => ECON.buildKeys(b)))].filter((k) => ECON.priceOf(k));
+const LOCAL_MONEY_KEY = 'viosGarage.localMoney.v1';
+const LOCAL_OWNED_KEY = 'viosGarage.localOwned.v1';
+let localMoney = (() => {
+  try {
+    const v = Number(localStorage.getItem(LOCAL_MONEY_KEY));
+    return Number.isFinite(v) && v >= ECON.START_MONEY ? v : ECON.START_MONEY;
+  } catch { return ECON.START_MONEY; }
+})();
+const localOwned = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem(LOCAL_OWNED_KEY) || '[]')); }
+  catch { return new Set(); }
+})();
+const saveLocalShop = () => {
+  try {
+    localStorage.setItem(LOCAL_MONEY_KEY, String(localMoney));
+    localStorage.setItem(LOCAL_OWNED_KEY, JSON.stringify([...localOwned]));
+  } catch {}
+};
+
+online.claim = () => [...new Set([...localOwned, ...garage.list().flatMap((b) => ECON.buildKeys(b))])].filter((k) => ECON.priceOf(k));
 // game layer (cash, garages, invites, map, profile)
 let inGarage = null;
 const game = new GameWorld({
@@ -177,13 +196,27 @@ const game = new GameWorld({
     minimap: () => C?.minimap,
     chased: () => false,
     hide: () => true,
+    localMoney: () => localMoney,
   },
 });
 const police = null;
 panel.shop = {
-  owns: (k) => online.owns(k),
-  money: () => online.me?.money ?? 0,
-  buy: async (k) => { const r = await online.buy(k); if (r.ok) { game.updateWallet(-1); game.sound('buy'); } return r; },
+  owns: (k) => (online.me ? online.owns(k) : localOwned.has(k)),
+  money: () => online.me?.money ?? localMoney,
+  buy: async (k) => {
+    if (online.me) {
+      const r = await online.buy(k);
+      if (r.ok) { game.updateWallet(-1); game.sound('buy'); }
+      return r;
+    }
+    const price = ECON.priceOf(k) || 0;
+    if (localMoney < price) return { ok: false, err: 'เงินไม่พอ' };
+    localMoney -= price;
+    localOwned.add(k);
+    saveLocalShop();
+    game.updateWallet(-1); game.sound('buy');
+    return { ok: true, money: localMoney };
+  },
 };
 online.on((ev) => { if (ev === 'me' && inGarage) panel.refresh(); });
 driver.onPad = (n) => {
@@ -202,7 +235,13 @@ let mode = 'garage';
 let chase = true;
 const hud = document.getElementById('hud');
 const touchEl = document.getElementById('touch');
-const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+let isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+addEventListener('touchstart', () => {
+  if (!isTouch) {
+    isTouch = true;
+    if (mode === 'city' || mode === 'drive') touchEl.hidden = false;
+  }
+}, { passive: true });
 const cityHud = document.getElementById('cityHud');
 document.getElementById('btnCityMenu').onclick = () => cityHud.classList.toggle('open');
 let C = null; // city context (lazy)
@@ -529,68 +568,111 @@ document.getElementById('btnResetCar').onclick = () => {
 };
 touchEl.querySelectorAll('button').forEach((b) => {
   const k = b.dataset.t;
-  const on = (e) => {
+  let tid = null;
+  const setOn = (on) => { driver.touch[k] = on ? 1 : 0; b.classList.toggle('press', on); };
+  b.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (tid === null && e.changedTouches.length) tid = e.changedTouches[0].identifier;
+    setOn(true);
+  }, { passive: false });
+  const touchEnd = (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === tid || e.touches.length === 0) { tid = null; setOn(false); break; }
+    }
+  };
+  b.addEventListener('touchend', touchEnd, { passive: false });
+  b.addEventListener('touchcancel', touchEnd, { passive: false });
+  b.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') return;
     e.preventDefault();
     try { b.setPointerCapture(e.pointerId); } catch {}
-    driver.touch[k] = 1; b.classList.add('press');
-  };
-  const off = (e) => {
-    e.preventDefault();
-    driver.touch[k] = 0; b.classList.remove('press');
-  };
-  b.addEventListener('pointerdown', on);
-  b.addEventListener('pointerup', off);
-  b.addEventListener('pointercancel', off);
-  b.addEventListener('lostpointercapture', off);
+    setOn(true);
+  });
+  const ptrOff = (e) => { if (e.pointerType === 'touch') return; e.preventDefault(); setOn(false); };
+  b.addEventListener('pointerup', ptrOff);
+  b.addEventListener('pointercancel', ptrOff);
 });
 
-// Analog Virtual Steering Joystick (multi-touch safe via pointerId + setPointerCapture)
+// Analog Virtual Steering Joystick (multi-touch safe via TouchEvent identifier + PointerEvent for mouse/pen)
 const joyEl = document.getElementById('joySteer');
 if (joyEl) {
   const knob = joyEl.querySelector('.joy-knob');
-  let joyPid = null, joyCx = 0, joyCy = 0, joyMaxR = 52;
+  let joyTid = null, joyPid = null, joyCx = 0, joyCy = 0, joyMaxR = 52;
+  const initRect = () => {
+    const rect = joyEl.getBoundingClientRect();
+    joyCx = rect.left + rect.width / 2;
+    joyCy = rect.top + rect.height / 2;
+    joyMaxR = Math.max(36, rect.width * 0.36);
+  };
   const updateJoy = (cx, cy) => {
     let dx = cx - joyCx, dy = cy - joyCy;
     const dist = Math.hypot(dx, dy);
     if (dist > joyMaxR) { const s = joyMaxR / dist; dx *= s; dy *= s; }
     knob.style.transform = `translate3d(${dx.toFixed(1)}px, ${(dy * 0.45).toFixed(1)}px, 0)`;
     const nx = Math.max(-1, Math.min(1, dx / joyMaxR));
-    if (Math.abs(nx) < 0.05) {
+    if (Math.abs(nx) < 0.04) {
       driver.touch.steer = 0;
+      joyEl.classList.remove('left', 'right');
     } else {
-      const mag = (Math.abs(nx) - 0.05) / 0.95;
-      // Smooth non-linear curve: precise straight-line control + full lock in tight corners
-      driver.touch.steer = Math.sign(nx) * (mag * 0.65 + mag * mag * 0.35);
+      const mag = (Math.abs(nx) - 0.04) / 0.96;
+      const val = Math.sign(nx) * (mag * 0.65 + mag * mag * 0.35);
+      driver.touch.steer = val;
+      joyEl.classList.toggle('left', val < -0.06);
+      joyEl.classList.toggle('right', val > 0.06);
     }
   };
-  const resetJoy = (e) => {
-    if (e && joyPid !== null && e.pointerId !== joyPid) return;
-    joyPid = null;
+  const resetJoy = () => {
+    joyTid = null; joyPid = null;
     driver.touch.steer = 0;
-    joyEl.classList.remove('active');
+    joyEl.classList.remove('active', 'left', 'right');
     knob.style.transform = 'translate3d(0px, 0px, 0)';
   };
+  const findTouch = (list, id) => {
+    for (let i = 0; i < list.length; i++) if (list[i].identifier === id) return list[i];
+    return null;
+  };
+  joyEl.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (joyTid !== null || !e.changedTouches.length) return;
+    const t = e.changedTouches[0];
+    joyTid = t.identifier;
+    initRect();
+    joyEl.classList.add('active');
+    updateJoy(t.clientX, t.clientY);
+  }, { passive: false });
+  joyEl.addEventListener('touchmove', (e) => {
+    if (joyTid === null) return;
+    const t = findTouch(e.changedTouches, joyTid) || findTouch(e.touches, joyTid);
+    if (!t) return;
+    e.preventDefault();
+    updateJoy(t.clientX, t.clientY);
+  }, { passive: false });
+  const onTouchEnd = (e) => {
+    if (joyTid === null) return;
+    if (findTouch(e.changedTouches, joyTid) || !findTouch(e.touches, joyTid)) resetJoy();
+  };
+  joyEl.addEventListener('touchend', onTouchEnd, { passive: false });
+  joyEl.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
   joyEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') return;
     e.preventDefault();
     if (joyPid !== null) return;
     joyPid = e.pointerId;
     try { joyEl.setPointerCapture(e.pointerId); } catch {}
-    const rect = joyEl.getBoundingClientRect();
-    joyCx = rect.left + rect.width / 2;
-    joyCy = rect.top + rect.height / 2;
-    joyMaxR = Math.max(36, rect.width * 0.36);
+    initRect();
     joyEl.classList.add('active');
     updateJoy(e.clientX, e.clientY);
   });
   joyEl.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== joyPid) return;
+    if (e.pointerType === 'touch' || e.pointerId !== joyPid) return;
     e.preventDefault();
     updateJoy(e.clientX, e.clientY);
   });
-  joyEl.addEventListener('pointerup', resetJoy);
-  joyEl.addEventListener('pointercancel', resetJoy);
-  joyEl.addEventListener('lostpointercapture', resetJoy);
-  addEventListener('blur', () => resetJoy());
+  const onPtrUp = (e) => { if (e.pointerType !== 'touch' && e.pointerId === joyPid) resetJoy(); };
+  joyEl.addEventListener('pointerup', onPtrUp);
+  joyEl.addEventListener('pointercancel', onPtrUp);
+  addEventListener('blur', resetJoy);
 }
 
 // ---------- loop ----------
@@ -840,36 +922,40 @@ function frame(now) {
   });
   const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p) });
 
-  // ---------- title → straight into the shared online world (no rooms, no offline mode) ----------
+  // ---------- instant entry: start straight in the game, connect online in background ----------
   const ttName = document.getElementById('ttName'), ttGo = document.getElementById('ttGo'), ttStatus = document.getElementById('ttStatus');
-  if (!ttName.value) ttName.value = online.name || ''; // don't wipe what was typed while the game loaded
+  if (!online.name) online.setName('นักซิ่ง' + Math.floor(100 + Math.random() * 900));
+  if (!ttName.value) ttName.value = online.name;
   ttName.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') ttGo.click(); });
   let entered = false;
-  ttGo.onclick = () => enterCity(false);
-  async function enterCity(fromLogin) {
-    const n = ttName.value.trim();
-    // after logging in, the account's saved racer name wins (the server fills it in on hello)
+  async function connectOnline(fromLogin = false) {
     if (fromLogin) online.setName('');
-    else {
-      if (!n) { ttName.focus(); ttStatus.textContent = 'ตั้งชื่อนักซิ่งก่อนนะ'; return; }
-      if (n !== online.name) online.setName(n);
-    }
-    ttGo.disabled = true; ttStatus.textContent = 'กำลังเชื่อมต่อเซิร์ฟเวอร์…';
     const r = await online.start();
-    if (!r.ok) { ttGo.disabled = false; ttGo.textContent = 'ลองเชื่อมต่ออีกครั้ง ↻'; ttStatus.textContent = '⚠️ ' + (r.err || 'เชื่อมต่อไม่ได้'); return; }
-    // what the server says we don't own goes back to stock (a car we don't own → the starter car)
+    if (!r.ok) {
+      game.updateWallet();
+      game.feed('🌐 เล่นแบบออฟไลน์ชั่วคราว — เชื่อมต่อบัญชีได้ภายหลังที่เมนู 👥');
+      return;
+    }
     if (panel.missing(build).some((k) => k.startsWith('car:'))) { garage.put(build); build = garage.get('gen2'); }
     stripUnowned(build);
     car.setBuild(build); updateCredit(); persist(); online.sendBuild();
     lastGoodEngine = JSON.parse(JSON.stringify(build.engine || null));
-    ttStatus.textContent = 'กำลังสร้างเมือง…';
-    await setMode('city', garageSpawn(GARAGES[0]));
-    document.body.classList.remove('title');
-    entered = true;
     game.updateWallet();
     game.feed(`ยินดีต้อนรับ <b>${online.name}</b> · เงิน ฿${online.me.money.toLocaleString()} · ออนไลน์ ${r.online} คน`);
     if (r.me.races === 0) game.feed('💡 เก็บเหรียญ ฿ ตามถนน · วงฟ้า = อู่ (กด E) · วงม่วง = อู่ลับ · วงแดง = จุดแข่ง · M = แผนที่', 'tip');
   }
+  async function enterCity(fromLogin) {
+    if (!fromLogin) {
+      const n = ttName.value.trim() || online.name || ('นักซิ่ง' + Math.floor(100 + Math.random() * 900));
+      if (n !== online.name) online.setName(n);
+    }
+    document.body.classList.remove('title');
+    if (mode !== 'city') await setMode('city', garageSpawn(GARAGES[0]));
+    entered = true;
+    game.updateWallet();
+    connectOnline(fromLogin);
+  }
+  ttGo.onclick = () => enterCity(false);
   online.on((ev) => {
     if (ev?.hello && entered) game.feed('🔄 เชื่อมต่อกลับเข้าเมืองแล้ว');
     if (ev?.kicked) { document.body.classList.add('title'); ttStatus.textContent = '⚠️ บัญชีนี้เข้าเล่นจากที่อื่นแล้ว — รีโหลดหน้าเพื่อเล่นที่นี่'; ttGo.disabled = true; }
@@ -883,8 +969,9 @@ function frame(now) {
     if (!r.ok) { ttStatus.textContent = '⚠️ ' + r.err; return; }
     enterCity(true);
   };
-  // switched account from the friends menu → go straight in as that account
-  try { if (sessionStorage.getItem('vg:relogin')) { sessionStorage.removeItem('vg:relogin'); enterCity(true); } } catch { /* ignore */ }
+  // Boot straight into the game (handle relogin if switched account from Social menu)
+  const relogin = (() => { try { const v = sessionStorage.getItem('vg:relogin'); if (v) sessionStorage.removeItem('vg:relogin'); return !!v; } catch { return false; } })();
+  enterCity(relogin);
 
   window.__vios = {
     car, world, driver, online, garage, race, gfx, gov, game, social, enterGarage,

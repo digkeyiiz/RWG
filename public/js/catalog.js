@@ -529,18 +529,18 @@ export const KIT_PACKAGES = [
 
 // Brands are shown in the spec and affect driving feel; geometry/lettering stays generic.
 export const WHEEL_BRANDS = [
-  { id: 'oem', name: 'Toyota (ล้อเดิม)', origin: 'ญี่ปุ่น' },
-  { id: 'generic', name: 'ไม่ระบุยี่ห้อ', origin: '—' },
-  { id: 'lenso', name: 'Lenso', origin: 'ไทย' },
-  { id: 'cosmis', name: 'Cosmis', origin: 'ไทย' },
-  { id: 'enkei', name: 'Enkei', origin: 'ญี่ปุ่น' },
-  { id: 'rays', name: 'RAYS (Volk / Gram Lights)', origin: 'ญี่ปุ่น' },
-  { id: 'work', name: 'WORK', origin: 'ญี่ปุ่น' },
-  { id: 'ssr', name: 'SSR', origin: 'ญี่ปุ่น' },
-  { id: 'advan', name: 'Advan', origin: 'ญี่ปุ่น' },
-  { id: 'weds', name: 'Weds', origin: 'ญี่ปุ่น' },
-  { id: 'bbs', name: 'BBS', origin: 'เยอรมนี' },
-  { id: 'oz', name: 'OZ Racing', origin: 'อิตาลี' },
+  { id: 'oem', name: 'Toyota (ล้อเดิม)', origin: 'ญี่ปุ่น', kg: 0 },
+  { id: 'generic', name: 'ไม่ระบุยี่ห้อ', origin: '—', kg: 0 },
+  { id: 'lenso', name: 'Lenso', origin: 'ไทย', kg: -8 },
+  { id: 'cosmis', name: 'Cosmis', origin: 'ไทย', kg: -10 },
+  { id: 'enkei', name: 'Enkei', origin: 'ญี่ปุ่น', kg: -16 },
+  { id: 'rays', name: 'RAYS (Volk / Gram Lights)', origin: 'ญี่ปุ่น', kg: -24 },
+  { id: 'work', name: 'WORK', origin: 'ญี่ปุ่น', kg: -14 },
+  { id: 'ssr', name: 'SSR', origin: 'ญี่ปุ่น', kg: -18 },
+  { id: 'advan', name: 'Advan', origin: 'ญี่ปุ่น', kg: -20 },
+  { id: 'weds', name: 'Weds', origin: 'ญี่ปุ่น', kg: -16 },
+  { id: 'bbs', name: 'BBS', origin: 'เยอรมนี', kg: -22 },
+  { id: 'oz', name: 'OZ Racing', origin: 'อิตาลี', kg: -22 },
 ];
 // grip: lateral grip multiplier · comfort: ride softness (affects body motion a little)
 export const TIRE_BRANDS = [
