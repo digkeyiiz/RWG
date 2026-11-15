@@ -76,7 +76,7 @@ export class Surfaces {
     let best = 0;
     for (const s of this.list) {
       let h = null;
-      if (s.t === 'fn') { const v = s.fn(x, z); if (v !== null) return Math.max(v, best); continue; }
+      if (s.t === 'fn') { const v = s.fn(x, z, curY); if (v !== null) return Math.max(v, best); continue; }
       if (s.t === 'ring') { if (Math.abs(sdRoundRect(x, z, s.half, s.radius)) < s.width / 2) h = s.y; }
       else if (s.t === 'ramp') {
         const sx = s.x1 - s.x0, sz = s.z1 - s.z0, L2 = sx * sx + sz * sz;

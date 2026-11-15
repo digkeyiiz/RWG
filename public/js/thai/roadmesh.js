@@ -6,11 +6,14 @@ export const LANE_W = 3.3;
 export const ELEV_H = 9;                 // elevated expressway deck height (m)
 export const ELEV_CLASSES = new Set(['motorway', 'trunk', 'primary', 'motorway_link', 'trunk_link']);
 const MINOR = new Set(['residential', 'service', 'living_street', 'unclassified', 'track', 'path', 'road']);
+const SIDEWALK_CLASSES = new Set(['trunk', 'primary', 'secondary']);
+const SIDEWALK_W = 1.1;                  // concrete sidewalk width on each side (m)
 const RANK = { motorway: 6, motorway_link: 5, trunk: 5, trunk_link: 4, primary: 4, primary_link: 3, secondary: 3, secondary_link: 2, tertiary: 2, tertiary_link: 1 };
 const DASH_CYCLE = 9;                    // metres per texture repeat along the road
 
 export function isMinor(c) { return MINOR.has(c) || !(c in RANK); }
 export function roadRank(c) { return RANK[c] || 0; }
+function hasSidewalk(r) { return !r.elev && SIDEWALK_CLASSES.has(r.c); }
 
 export function defaultLanes(r) {
   const c = r.c, o = r.o;
@@ -28,7 +31,7 @@ export function laneCount(r) {
 export function roadWidth(r) {
   const L = laneCount(r);
   if (isMinor(r.c)) return Math.max(4.5, L * LANE_W + 0.4);
-  return L * LANE_W + 1.0;
+  return L * LANE_W + 1.0 + (hasSidewalk(r) ? SIDEWALK_W * 2 : 0);
 }
 /** Road y offset above ground: higher class draws on top (avoids z-fight at junctions). */
 export function roadY(r) { return 0.04 + roadRank(r.c) * 0.03; }
@@ -83,45 +86,116 @@ export class Geo {
 }
 
 // ---------------------------------------------------------------- textures
-/** Key identifying the marking layout: lanes + oneway + minor. */
+/** Key identifying the marking layout: minor ('m'), sidewalked ('s'), or highway/tertiary ('r') + lanes + oneway. */
 export function roadTexKey(r) {
   if (isMinor(r.c)) return 'm' + (r.o ? 1 : 0);
-  return 'r' + laneCount(r) + (r.o ? 'o' : 't');
+  return (hasSidewalk(r) ? 's' : 'r') + laneCount(r) + (r.o ? 'o' : 't');
 }
 
 export function makeRoadTexture(key, aniso = 4) {
-  const minor = key[0] === 'm';
+  const minor = key[0] === 'm', sidewalk = key[0] === 's';
   let lanes = 2, oneway = key.endsWith('o') || key === 'm1';
   if (!minor) lanes = parseInt(key.slice(1), 10);
-  const widthM = minor ? 5 : lanes * LANE_W + 1.0;
+  const sideW = sidewalk ? SIDEWALK_W : 0;
+  const roadW = minor ? 5 : lanes * LANE_W + 1.0;
+  const widthM = roadW + sideW * 2;
   const PPM = 12;
   const W = Math.max(32, Math.round(widthM * PPM)), H = 256;
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const g = cv.getContext('2d');
-  g.fillStyle = '#2b2c2f'; g.fillRect(0, 0, W, H);
-  // subtle asphalt grain
-  for (let i = 0; i < W * H / 14; i++) {
-    const v = 36 + (Math.random() * 22) | 0;
-    g.fillStyle = `rgb(${v},${v},${v + 2})`;
-    g.fillRect(Math.random() * W, Math.random() * H, 1.5, 1.5);
+  const img = g.createImageData(W, H);
+  const d = img.data;
+
+  // Deterministic fast PRNG for crisp aggregate grain & longitudinal wear
+  let seed = (W * 73856093) ^ (lanes * 19349663) ^ (sidewalk ? 83492791 : 0);
+  const nextRand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed; };
+  const colWear = new Float32Array(W);
+  for (let x = 0; x < W; x++) colWear[x] = ((nextRand() & 255) / 255 - 0.5) * 3.5;
+
+  const jointPeriod = H / 4;   // 2.25m sidewalk slab joints
+  const curbPeriod = H / 6;    // 1.5m curb block joints
+  for (let y = 0; y < H; y++) {
+    const isSlabJoint = (y % jointPeriod) < 1.3;
+    const isCurbJoint = (y % curbPeriod) < 1.1;
+    for (let x = 0; x < W; x++) {
+      const xm = (x + 0.5) / PPM;
+      const idx = (y * W + x) * 4;
+      const rnd = nextRand();
+      const grain = ((rnd & 15) - 7.5) * 0.65;
+      const fleck = (rnd & 127) === 0 ? 11 : (rnd & 127) === 1 ? -9 : 0;
+
+      if (sideW > 0 && (xm < sideW || xm > widthM - sideW)) {
+        // Concrete sidewalk + raised curb + gutter shadow
+        const dOut = Math.min(xm, widthM - xm);
+        const dIn = sideW - dOut;
+        let base = 116;
+        if (dIn < 0.04) {
+          base = 44; // gutter shadow
+        } else if (dIn < 0.17) {
+          base = isCurbJoint ? 92 : 134; // raised curb stone
+        } else {
+          if (isSlabJoint) base -= 16;
+          if (dOut < 0.09) base -= 14; // grass-edge darkening
+        }
+        const v = Math.max(0, Math.min(255, (base + grain * 0.7 + fleck * 0.5) | 0));
+        d[idx] = v; d[idx + 1] = v + 1; d[idx + 2] = Math.max(0, v - 3); d[idx + 3] = 255;
+        continue;
+      }
+
+      // Asphalt surface
+      const rx = xm - sideW;
+      let lum = 38 + colWear[x];
+      let wearSmooth = 1.0;
+
+      if (!minor) {
+        if (rx < 0.5 || rx > roadW - 0.5) {
+          // Shoulder: slightly dustier/lighter weathered asphalt
+          lum += 5;
+          const dEdge = Math.min(rx, roadW - rx);
+          if (dEdge < 0.08) lum -= 6;
+        } else {
+          const lx = (rx - 0.5) % LANE_W;
+          const t1 = (lx - 0.85) / 0.36, t2 = (lx - 2.45) / 0.36;
+          const track = Math.exp(-t1 * t1) + Math.exp(-t2 * t2);
+          const centerOil = Math.exp(-Math.pow((lx - 1.65) / 0.42, 2));
+          lum -= track * 6.5 + centerOil * 2.2;
+          wearSmooth = 1.0 - track * 0.35;
+        }
+      } else {
+        const t1 = (rx - roadW * 0.33) / 0.45, t2 = (rx - roadW * 0.67) / 0.45;
+        const track = Math.exp(-t1 * t1) + Math.exp(-t2 * t2);
+        lum += 3 - track * 5.5;
+        wearSmooth = 1.0 - track * 0.3;
+      }
+
+      const noise = grain * wearSmooth + fleck * wearSmooth;
+      const rVal = Math.max(0, Math.min(255, (lum + noise) | 0));
+      const gVal = Math.max(0, Math.min(255, (lum + 1 + noise) | 0));
+      const bVal = Math.max(0, Math.min(255, (lum + 4 + noise) | 0));
+      d[idx] = rVal; d[idx + 1] = gVal; d[idx + 2] = bVal; d[idx + 3] = 255;
+    }
   }
+  g.putImageData(img, 0, 0);
+
   if (!minor) {
-    const m = (x) => x * PPM, lw = 0.15 * PPM;
+    const m = (x) => (sideW + x) * PPM, lw = 0.14 * PPM;
     const line = (xm, col, w) => { g.fillStyle = col; g.fillRect(m(xm) - w / 2, 0, w, H); };
     const dash = (xm, col) => { g.fillStyle = col; g.fillRect(m(xm) - lw / 2, 0, lw, H * (3 / DASH_CYCLE)); };
-    line(0.5 + 0.1, '#e8e8e8', lw); line(widthM - 0.6, '#e8e8e8', lw);   // edge lines
+    g.globalAlpha = 0.92;
+    line(0.5 + 0.08, '#ebebea', lw); line(roadW - 0.58, '#ebebea', lw);   // edge lines
     if (oneway) {
-      for (let k = 1; k < lanes; k++) dash(0.5 + k * LANE_W, '#e8e8e8');
+      for (let k = 1; k < lanes; k++) dash(0.5 + k * LANE_W, '#ebebea');
     } else {
-      const cx = widthM / 2;
+      const cx = roadW / 2;
       if (lanes >= 2) {
-        line(cx - 0.12, '#e6b800', lw); line(cx + 0.12, '#e6b800', lw);   // double yellow centre
+        line(cx - 0.12, '#eab600', lw * 0.9); line(cx + 0.12, '#eab600', lw * 0.9);   // double yellow centre
         const per = lanes / 2;
-        for (let k = 1; k < per; k++) { dash(cx - k * LANE_W, '#e8e8e8'); dash(cx + k * LANE_W, '#e8e8e8'); }
+        for (let k = 1; k < per; k++) { dash(cx - k * LANE_W, '#ebebea'); dash(cx + k * LANE_W, '#ebebea'); }
       } else {
-        g.fillStyle = '#e6b800'; g.fillRect(m(cx) - lw / 2, 0, lw, H * (3 / DASH_CYCLE));
+        dash(cx, '#eab600');
       }
     }
+    g.globalAlpha = 1.0;
   }
   const t = new THREE.CanvasTexture(cv);
   t.wrapS = THREE.ClampToEdgeWrapping; t.wrapT = THREE.RepeatWrapping;
@@ -197,34 +271,73 @@ export function addRoadRibbon(geo, conc, r, a, b, opts = {}) {
     geo.tri(l0, r1, l1); geo.tri(l0, r0, r1);
   }
   if (!elev || !conc) return;
-  // ---- deck structure
-  const BOT = 1.5, PARA = 0.9, PW = 0.35;
-  let lastPier = -1e9;
+  addElevatedDeck(conc, X, Z, Y, Lx, Lz, Rx, Rz, halfW);
+  addPiers(conc, X, Z, Y, D, dX, dZ, halfW);
+}
+
+/** Emit elevated expressway box deck and sloped concrete Jersey barriers with top caps. */
+export function addElevatedDeck(conc, X, Z, Y, Lx, Lz, Rx, Rz, halfW) {
+  const n = X.length;
+  if (n < 2) return;
+  const BOT = 1.5, PARA = 0.95, KNEE_H = 0.26;
+  const IN0 = 0.42, IN1 = 0.25, IN2 = 0.20;
+  const invHW = 1 / (halfW || 1);
   for (let k = 0; k < n - 1; k++) {
     const k1 = k + 1;
-    const yb0 = Y[k] - BOT, yb1 = Y[k1] - BOT, yt0 = Y[k] + PARA, yt1 = Y[k1] + PARA;
-    // right side (outer, normal +s)  / left side (outer, normal -s)
-    const rO0 = [Rx[k], yb0, Rz[k]], rO1 = [Rx[k1], yb1, Rz[k1]];
-    conc.quad(rO0, rO1, [Rx[k1], yt1, Rz[k1]], [Rx[k], yt0, Rz[k]]);
+    const yb0 = Y[k] - BOT, yb1 = Y[k1] - BOT;
+    const yt0 = Y[k] + PARA, yt1 = Y[k1] + PARA;
+    const yk0 = Y[k] + KNEE_H, yk1 = Y[k1] + KNEE_H;
+    const ux0 = (Rx[k] - X[k]) * invHW, uz0 = (Rz[k] - Z[k]) * invHW;
+    const ux1 = (Rx[k1] - X[k1]) * invHW, uz1 = (Rz[k1] - Z[k1]) * invHW;
+
+    // Outer deck + barrier walls
+    conc.quad([Rx[k], yb0, Rz[k]], [Rx[k1], yb1, Rz[k1]], [Rx[k1], yt1, Rz[k1]], [Rx[k], yt0, Rz[k]]);
     conc.quad([Lx[k1], yb1, Lz[k1]], [Lx[k], yb0, Lz[k]], [Lx[k], yt0, Lz[k]], [Lx[k1], yt1, Lz[k1]]);
-    // inner parapet faces (visible from road): y .. y+PARA
-    conc.quad([Rx[k1], Y[k1], Rz[k1]], [Rx[k], Y[k], Rz[k]], [Rx[k], yt0, Rz[k]], [Rx[k1], yt1, Rz[k1]]);
-    conc.quad([Lx[k], Y[k], Lz[k]], [Lx[k1], Y[k1], Lz[k1]], [Lx[k1], yt1, Lz[k1]], [Lx[k], yt0, Lz[k]]);
-    // underside
+
+    // Barrier inner offsets (mitered)
+    const r0x0 = Rx[k] - ux0 * IN0, r0z0 = Rz[k] - uz0 * IN0, r0x1 = Rx[k1] - ux1 * IN0, r0z1 = Rz[k1] - uz1 * IN0;
+    const r1x0 = Rx[k] - ux0 * IN1, r1z0 = Rz[k] - uz0 * IN1, r1x1 = Rx[k1] - ux1 * IN1, r1z1 = Rz[k1] - uz1 * IN1;
+    const r2x0 = Rx[k] - ux0 * IN2, r2z0 = Rz[k] - uz0 * IN2, r2x1 = Rx[k1] - ux1 * IN2, r2z1 = Rz[k1] - uz1 * IN2;
+    const l0x0 = Lx[k] + ux0 * IN0, l0z0 = Lz[k] + uz0 * IN0, l0x1 = Lx[k1] + ux1 * IN0, l0z1 = Lz[k1] + uz1 * IN0;
+    const l1x0 = Lx[k] + ux0 * IN1, l1z0 = Lz[k] + uz0 * IN1, l1x1 = Lx[k1] + ux1 * IN1, l1z1 = Lz[k1] + uz1 * IN1;
+    const l2x0 = Lx[k] + ux0 * IN2, l2z0 = Lz[k] + uz0 * IN2, l2x1 = Lx[k1] + ux1 * IN2, l2z1 = Lz[k1] + uz1 * IN2;
+
+    // Top caps (flat horizontal concrete faces)
+    conc.quad([Rx[k], yt0, Rz[k]], [Rx[k1], yt1, Rz[k1]], [r2x1, yt1, r2z1], [r2x0, yt0, r2z0]);
+    conc.quad([l2x0, yt0, l2z0], [l2x1, yt1, l2z1], [Lx[k1], yt1, Lz[k1]], [Lx[k], yt0, Lz[k]]);
+
+    // Inner Jersey barrier faces (lower kick-slope + upper sloped wall)
+    conc.quad([r0x1, Y[k1], r0z1], [r0x0, Y[k], r0z0], [r1x0, yk0, r1z0], [r1x1, yk1, r1z1]);
+    conc.quad([r1x1, yk1, r1z1], [r1x0, yk0, r1z0], [r2x0, yt0, r2z0], [r2x1, yt1, r2z1]);
+    conc.quad([l0x0, Y[k], l0z0], [l0x1, Y[k1], l0z1], [l1x1, yk1, l1z1], [l1x0, yk0, l1z0]);
+    conc.quad([l1x0, yk0, l1z0], [l1x1, yk1, l1z1], [l2x1, yt1, l2z1], [l2x0, yt0, l2z0]);
+
+    // Deck underside
     conc.quad([Lx[k], yb0, Lz[k]], [Lx[k1], yb1, Lz[k1]], [Rx[k1], yb1, Rz[k1]], [Rx[k], yb0, Rz[k]]);
-    // piers
-    if (Y[k] > 3 && D[k] - lastPier >= 28) {
-      lastPier = D[k];
-      const dl = Math.hypot(dX[k], dZ[k]) || 1, fx = dX[k] / dl, fz = dZ[k] / dl, sx = -fz, sz = fx;
-      const hw = Math.min(1.1, halfW * 0.18), hl = 0.9, cx = X[k], cz = Z[k], top = Y[k] - BOT, gy = 0;
-      const c = [
-        [cx - fx * hl - sx * hw, cz - fz * hl - sz * hw], [cx + fx * hl - sx * hw, cz + fz * hl - sz * hw],
-        [cx + fx * hl + sx * hw, cz + fz * hl + sz * hw], [cx - fx * hl + sx * hw, cz - fz * hl + sz * hw],
-      ];
-      for (let e = 0; e < 4; e++) {
-        const A = c[e], B = c[(e + 1) % 4];
-        conc.quad([A[0], gy, A[1]], [B[0], gy, B[1]], [B[0], top, B[1]], [A[0], top, A[1]]);
-      }
+  }
+}
+
+/** Emit elevated expressway support piers along sampled deck points. */
+export function addPiers(conc, X, Z, Y, D, dX, dZ, halfW) {
+  const BOT = 1.5;
+  let lastPier = -1e9;
+  for (let k = 0; k < X.length - 1; k++) {
+    if (Y[k] <= 3 || D[k] - lastPier < 28) continue;
+    lastPier = D[k];
+    const dl = Math.hypot(dX[k], dZ[k]) || 1, fx = dX[k] / dl, fz = dZ[k] / dl, sx = -fz, sz = fx;
+    const hw = Math.min(1.1, halfW * 0.18), hl = 0.9, cx = X[k], cz = Z[k], top = Y[k] - BOT, gy = 0;
+    const c = [
+      [cx - fx * hl - sx * hw, cz - fz * hl - sz * hw], [cx + fx * hl - sx * hw, cz + fz * hl - sz * hw],
+      [cx + fx * hl + sx * hw, cz + fz * hl + sz * hw], [cx - fx * hl + sx * hw, cz - fz * hl + sz * hw],
+    ];
+    for (let e = 0; e < 4; e++) {
+      const A = c[e], B = c[(e + 1) % 4];
+      conc.quad([A[0], gy, A[1]], [B[0], gy, B[1]], [B[0], top, B[1]], [A[0], top, A[1]]);
     }
   }
+}
+
+/** Emit a coarse road ribbon (no deck/piers, sparse sampling). */
+export function addCoarseRibbon(geo, r, a, b, opts = {}) {
+  addRoadRibbon(geo, null, r, a, b, { ...opts, coarse: true });
 }

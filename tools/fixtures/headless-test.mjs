@@ -5,14 +5,17 @@ import path from 'path';
 import { pathToFileURL } from 'url';
 const root = path.resolve(import.meta.dirname, '..', '..');
 const dir = path.resolve(root, process.argv[2] || 'data');
-const ctx2d = new Proxy({}, { get: (t, k) => (k === 'canvas' ? {} : () => ({})), set: () => true });
+const grad = { addColorStop: () => ({}) };
+const ctx2d = new Proxy({}, { get: (t, k) => (k === 'canvas' ? {} : k === 'createRadialGradient' ? () => grad : k === 'createImageData' ? (w, h) => ({ data: new Uint8ClampedArray(Math.max(4, (w|0)*(h|0)*4)) }) : () => ({})), set: () => true });
 globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d, style: {} }) };
 globalThis.fetch = async (u) => { const f = path.resolve(dir, path.basename(u)); if (!fs.existsSync(f)) return { ok: false }; return { ok: true, json: async () => JSON.parse(fs.readFileSync(f, 'utf8')) }; };
 // vendor three resolution: import map substitute
 const THREE = await import(pathToFileURL(path.join(root, 'vendor/three/three.module.min.js')).href);
 globalThis.__THREE = THREE;
 let src = {};
-for (const f of ['roadmesh', 'thaimap', 'minimapLayer']) src[f] = fs.readFileSync(path.join(root, 'js/thai', f + '.js'), 'utf8').replace(/from 'three'/g, `from '${pathToFileURL(path.join(root, 'vendor/three/three.module.min.js')).href}'`);
+for (const f of ['roadmesh', 'worldprops', 'thaimap', 'minimapLayer']) src[f] = fs.readFileSync(path.join(root, 'js/thai', f + '.js'), 'utf8')
+  .replace(/from 'three'/g, `from '${pathToFileURL(path.join(root, 'vendor/three/three.module.min.js')).href}'`)
+  .replace(/from '\.\.\/city\/physics\.js'/g, `from '${pathToFileURL(path.join(root, 'js/city/physics.js')).href}'`);
 const tmp = path.join(root, 'tools/fixtures/.tmp'); fs.mkdirSync(tmp, { recursive: true });
 for (const f in src) fs.writeFileSync(path.join(tmp, f + '.js'), src[f]);
 const { ThaiMap } = await import(pathToFileURL(path.join(tmp, 'thaimap.js')).href);

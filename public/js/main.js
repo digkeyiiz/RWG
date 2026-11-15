@@ -196,6 +196,38 @@ const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in win
 const cityHud = document.getElementById('cityHud');
 document.getElementById('btnCityMenu').onclick = () => cityHud.classList.toggle('open');
 let C = null; // city context (lazy)
+let cityMap = 'bkk'; // 'bkk' | 'th' | 'jp'
+const realMaps = {};
+let ThaiMapCls = null, drawThaiMinimapFn = null, realTraffic = null;
+const REAL_CFG = {
+  th: {
+    country: 'th-roads.json', local: 'bkk-local.json', origin: { lat: 13.758, lon: 100.565 },
+    spots: [
+      ['พระราม 9 (แยกพระราม 9)', 13.7580, 100.5650],
+      ['อโศก - สุขุมวิท', 13.7367, 100.5604],
+      ['ทางด่วนศรีรัช - ดินแดง', 13.7634, 100.5494],
+      ['เชียงใหม่ (ซุปเปอร์ไฮเวย์)', 18.8035, 98.9850],
+      ['พัทยา (มอเตอร์เวย์ 7)', 12.9357, 100.9030],
+      ['ภูเก็ต (เทพกระษัตรี)', 7.9120, 98.3920],
+    ],
+  },
+  jp: {
+    country: 'jp-roads.json', local: 'tokyo-local.json', origin: { lat: 35.6762, lon: 139.7503 },
+    spots: [
+      ['โตเกียว C1 / กินซ่า', 35.6762, 139.7503],
+      ['ชิบูย่า (Shibuya)', 35.6595, 139.7004],
+      ['โตเกียวทาวเวอร์ / ชิบะ', 35.6586, 139.7454],
+      ['โอซาก้า (Osaka)', 34.6937, 135.5023],
+      ['โยโกฮามา (Yokohama)', 35.4437, 139.6380],
+      ['นาโกย่า (Nagoya)', 35.1815, 136.9066],
+    ],
+  },
+};
+const activeRealMap = () => (cityMap === 'bkk' ? null : realMaps[cityMap] || null);
+const projectReal = (cfg, lat, lon) => [
+  (lon - cfg.origin.lon) * 111320 * Math.cos(cfg.origin.lat * Math.PI / 180),
+  -(lat - cfg.origin.lat) * 110574,
+];
 const isMobile = isTouch || Math.min(innerWidth, innerHeight) < 600;
 let hour = 18.5, timeAuto = true, trafficOn = true;
 let raceTraffic = null; // race override: true/false, null = player's choice
@@ -298,14 +330,26 @@ function rebuildTraffic() {
   }
   syncTraffic();
 }
-const trafficActive = () => !!C?.traffic && (raceTraffic ?? trafficOn);
+const trafficActive = () => cityMap === 'bkk' && !!C?.traffic && (raceTraffic ?? trafficOn);
 function syncTraffic() {
   if (!C) return;
+  const rm = activeRealMap();
+  const isBkk = cityMap === 'bkk' && !rm;
   if (C.traffic) C.traffic.group.visible = mode === 'city' && trafficActive();
-  if (mode === 'city') driver.setEnv({ colliders: C.city.colliders, surfaces: C.city.surfaces, traffic: trafficActive() ? C.traffic : null, peers: online, bots: race, cops: police, surfaceMu });
+  C.city.group.visible = mode === 'city' && isBkk;
+  game.group.visible = mode === 'city' && isBkk;
+  if (police) police.group.visible = mode === 'city' && isBkk;
+  for (const [k, m] of Object.entries(realMaps)) m.group.visible = mode === 'city' && cityMap === k;
+  if (realTraffic) realTraffic.setVisible(mode === 'city' && !!rm && trafficOn);
+  if (mode === 'city') {
+    if (rm) driver.setEnv({ colliders: rm.colliders, surfaces: rm.surfaces, traffic: trafficOn ? realTraffic : null, peers: online, bots: null, cops: null, surfaceMu });
+    else driver.setEnv({ colliders: C.city.colliders, surfaces: C.city.surfaces, traffic: trafficActive() ? C.traffic : null, peers: online, bots: race, cops: police, surfaceMu });
+  }
 }
-// grip of the surface under the car: asphalt 1, grass/dirt off the mountain road 0.55
+// grip of the surface under the car: asphalt 1, grass/dirt off the road 0.55-0.65
 function surfaceMu(x, z) {
+  const rm = activeRealMap();
+  if (rm) return rm.roadAt(x, z) ? 1 : 0.65;
   if (x < -560 && C?.touge && C.touge.roadHeight(x, z) === null) return 0.55;
   return 1;
 }
@@ -352,16 +396,19 @@ async function setMode(m, spawn = null) {
   touchEl.hidden = !driving || !isTouch;
   cityHud.hidden = m !== 'city';
   if (m !== 'city' && race.active) race.abort('ออกจากการแข่งขัน');
-  if (C) { C.city.group.visible = m === 'city'; C.sky.group.visible = m === 'city'; C.weather.lines.visible = m === 'city' && gfx.get('weather') === 'rain'; }
-  game.group.visible = m === 'city';
-  if (police) police.group.visible = m === 'city';
+  if (C) { C.sky.group.visible = m === 'city'; C.weather.lines.visible = m === 'city' && gfx.get('weather') === 'rain'; }
   syncTraffic();
   applyView();
   if (m !== 'city') car.setAutoLights(false);
   if (driving) {
     controls.autoRotate = false; btnRotate.classList.remove('on');
     if (m === 'city') syncTraffic(); else driver.setEnv(null);
-    if (m === 'city') spawnAt(spawn || garageSpawn(GARAGES[0]));
+    if (m === 'city') {
+      const rm = activeRealMap();
+      if (spawn) spawnAt(spawn);
+      else if (rm) jumpRealSpot(0);
+      else spawnAt(garageSpawn(GARAGES[0]));
+    }
     else { driver.reset(); driver.resetCones(); camera.position.set(-7, 2.4, 0); controls.target.set(0, 0.8, 0); }
   } else {
     driver.setEnv(null);
@@ -380,7 +427,65 @@ document.getElementById('btnTraffic').onclick = (e) => {
   syncTraffic();
 };
 addEventListener('resize', () => { if (C) { C.composer.setSize(innerWidth, innerHeight); } });
-document.getElementById('btnSafehouse').onclick = () => { if (race.active) race.abort(); if (mode === 'city') spawnAt(garageSpawn(GARAGES[0])); };
+const realJumpEl = document.getElementById('realJump');
+function jumpRealSpot(idx = 0) {
+  const rm = activeRealMap(), cfg = REAL_CFG[cityMap];
+  if (!rm || !cfg) return;
+  const sp = cfg.spots[idx] || cfg.spots[0];
+  const [x, z] = projectReal(cfg, sp[1], sp[2]);
+  rm.warm({ x, z }, 14);
+  const rd = rm.nearestRoadPoint(x, z, 600);
+  spawnRaw(rd || { x, y: 0, z, heading: 0 });
+  toast(`📍 ${sp[0]}`);
+}
+async function switchCityMap(w) {
+  if (w === cityMap) return;
+  if (race.active) race.abort('เปลี่ยนแผนที่');
+  if (w !== 'bkk') {
+    await ensureCity();
+    const ld = document.getElementById('loading');
+    if (!realMaps[w]) {
+      ld.textContent = w === 'jp' ? 'กำลังโหลดแผนที่ญี่ปุ่น…' : 'กำลังโหลดแผนที่ไทย…';
+      ld.classList.remove('hide');
+      if (!ThaiMapCls) {
+        const [tmMod, mmMod, rtMod] = await Promise.all([
+          import('./thai/thaimap.js'), import('./thai/minimapLayer.js'), import('./thai/realtraffic.js'),
+        ]);
+        ThaiMapCls = tmMod.ThaiMap; drawThaiMinimapFn = mmMod.drawThaiMinimap;
+        realTraffic = new rtMod.RealTraffic(scene, gfx.get('preset') === 'low' ? 25 : 50);
+      }
+      const q = gfx.get('preset') === 'low' ? 0 : gfx.get('preset') === 'medium' ? 1 : 2;
+      const tm = new ThaiMapCls(scene, { quality: q, isJapan: w === 'jp' });
+      const res = await tm.load('data/', REAL_CFG[w]);
+      if (!res.local && !res.country) { ld.classList.add('hide'); toast('ยังไม่มีข้อมูลแผนที่นี้'); return; }
+      realMaps[w] = tm;
+      ld.classList.add('hide');
+    }
+  }
+  cityMap = w;
+  document.getElementById('prompt').hidden = true;
+  document.querySelectorAll('#worldSeg button').forEach((b) => b.classList.toggle('on', b.dataset.w === w));
+  const cfg = REAL_CFG[w];
+  realJumpEl.hidden = !cfg;
+  if (cfg) {
+    realJumpEl.innerHTML = cfg.spots.map((s, i) => `<option value="${i}">📍 ${s[0]}</option>`).join('');
+    realJumpEl.value = '0';
+  }
+  syncTraffic();
+  if (mode === 'city') {
+    if (w === 'bkk') spawnAt(garageSpawn(GARAGES[0]));
+    else jumpRealSpot(0);
+  }
+}
+document.querySelectorAll('#worldSeg button').forEach((b) => { b.onclick = () => switchCityMap(b.dataset.w); });
+realJumpEl.onchange = () => jumpRealSpot(+realJumpEl.value);
+
+document.getElementById('btnSafehouse').onclick = () => {
+  if (race.active) race.abort();
+  if (mode !== 'city') return;
+  if (cityMap !== 'bkk') jumpRealSpot(0);
+  else spawnAt(garageSpawn(GARAGES[0]));
+};
 // ---------- garages: the showroom is the inside of the garage you drove into ----------
 async function enterGarage(m) {
   inGarage = m;
@@ -406,6 +511,13 @@ document.getElementById('btnResetCar').onclick = () => {
   if (race.respawn()) return;
   if (mode !== 'city') { driver.reset(); return; }
   const p = driver.pos;
+  const rm = activeRealMap();
+  if (rm) {
+    const rd = rm.nearestRoadPoint(p.x, p.z, 250);
+    if (rd) { spawnRaw(rd); return; }
+    spawnRaw({ x: p.x, y: rm.groundHeight(p.x, p.z, driver.y), z: p.z, heading: driver.heading });
+    return;
+  }
   const nb = C?.touge?.nearest(p.x, p.z, 80);
   if (nb && p.x < -560) { const q = C.touge.path[nb.i]; spawnRaw({ x: q.x, y: q.y, z: q.z, heading: Math.atan2(-q.tz, q.tx) }); return; }
   spawnRaw({ x: p.x, y: driver.y || 0, z: p.z, heading: driver.heading });
@@ -445,8 +557,15 @@ function frame(now) {
     C.weather.update(dt, car.root.position, driver.vel, C.city, C.sky, VIEW[gfx.get('view')].fog);
     C.sky.updateEnv(renderer, hour, C.weather.wet);
     car.setAutoLights(night > 0.55);
-    C.city.update(dt, night);
-    if (trafficActive()) C.traffic.update(dt, { x: driver.pos.x, z: driver.pos.z, y: driver.y || 0 }, night);
+    const rm = activeRealMap();
+    if (rm) {
+      rm.setNight(night);
+      rm.update(camera.position, dt);
+      if (realTraffic && trafficOn) realTraffic.update(dt, { x: driver.pos.x, y: driver.y || 0, z: driver.pos.z }, rm, night);
+    } else {
+      C.city.update(dt, night);
+      if (trafficActive()) C.traffic.update(dt, { x: driver.pos.x, z: driver.pos.z, y: driver.y || 0 }, night);
+    }
     C.sky.group.position.set(camera.position.x, 0, camera.position.z);
     // nothing past the fog end is visible → don't draw it (big saving: the city from the mountain and vice versa)
     const farWant = Math.max(1500, Math.min(VIEW[gfx.get('view')].far, C.sky.fog.far * 1.03));
@@ -483,12 +602,25 @@ function frame(now) {
       controls.target.set(cp.x + Math.cos(driver.heading) * lookAhead, cp.y + 0.82, cp.z - Math.sin(driver.heading) * lookAhead);
     }
     if (mode === 'city' && C) {
-      race.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z });
+      const rm = activeRealMap();
+      if (!rm) race.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z });
       sun.position.copy(cp).addScaledVector(C.sky.sunDir, 150); sun.castShadow = night < 0.9 && sun.userData.shadowOn;
       if ((mmT -= dt) <= 0) { // minimap at ~20 Hz is plenty
         mmT = 0.05;
-        const rr = race.route();
-        C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, game.icons().concat(police ? police.dots().map((d) => ({ ...d, kind: 'cop' })) : []));
+        if (rm && drawThaiMinimapFn) {
+          const g = C.minimap.ctx, W = g.canvas.width, R = W / 2;
+          g.clearRect(0, 0, W, W);
+          g.save();
+          g.beginPath(); g.arc(R, R, R - 2, 0, Math.PI * 2); g.clip();
+          g.fillStyle = '#1b2a1b'; g.fillRect(0, 0, W, W);
+          drawThaiMinimapFn(g, rm, cp.x, cp.z, 0.45, driver.heading - Math.PI / 2);
+          g.restore();
+          g.fillStyle = '#4cc3ff'; g.strokeStyle = '#000'; g.lineWidth = 2;
+          g.beginPath(); g.moveTo(R, R - 10); g.lineTo(R + 7, R + 8); g.lineTo(R, R + 4); g.lineTo(R - 7, R + 8); g.closePath(); g.fill(); g.stroke();
+        } else {
+          const rr = race.route();
+          C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, game.icons().concat(police ? police.dots().map((d) => ({ ...d, kind: 'cop' })) : []));
+        }
       }
     } else { sun.position.copy(cp).add(new THREE.Vector3(4, 8, 3)); sun.castShadow = sun.userData.shadowOn; }
     sun.target.position.copy(cp);
@@ -502,7 +634,7 @@ function frame(now) {
     if (s.nos !== null) { nosI.style.width = `${Math.round(s.nos * 100)}%`; nosBar.classList.toggle('on', !!s.nosOn); }
     const fov = baseFov() + (gfx.get('fovKick') ? Math.min(9, s.kmh * 0.045) + (s.nosOn ? 5 : 0) : 0);
     if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
-    if (mode === 'city') {
+    if (mode === 'city' && !activeRealMap()) {
       game.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z }, driver.vel.length(), mode);
       police?.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z, vx: driver.vel.x, vz: driver.vel.z, speed: driver.vel.length() }, mode);
       police?.share(dt);
