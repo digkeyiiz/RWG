@@ -78,7 +78,7 @@ class Store {
     return p ? { key, p, created: false } : null;
   }
 
-  create(token, name, startMoney = 25000) {
+  create(token, name, startMoney = 999999999) {
     const key = 'u_' + crypto.randomBytes(8).toString('hex');
     const p = {
       name: name || 'นักซิ่ง',

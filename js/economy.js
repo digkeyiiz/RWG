@@ -2,7 +2,7 @@
 // so prices and rewards can only be decided in one place. No DOM, no imports besides engine data.
 import { PARTS, ENGINES } from './engine.js';
 
-export const START_MONEY = 25000;
+export const START_MONEY = 999999999;
 
 // Cars you can own. The Vios is the starter car (free). Prices follow real-world desirability, not MSRP.
 export const CAR_PRICES = {

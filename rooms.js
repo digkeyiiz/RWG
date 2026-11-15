@@ -171,6 +171,9 @@ function attachRooms(httpServer) {
           }
           if (value) store.tx(rec.key, 'claim', 0, { value, items: rec.p.owned.length });
         }
+      } else if (rec.p.money < E.START_MONEY) {
+        rec.p.money = E.START_MONEY;
+        store.touch();
       }
       // logging in on a new device without typing a name keeps the profile's name
       if (String(d.name ?? '').trim() || rec.created) rec.p.name = name;
