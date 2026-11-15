@@ -11,6 +11,12 @@ export const CAR_SPECS = {
   'civic-fe': { engine: 'L15CA', mass: 1330, drive: 'FF', gears: [3.62, 2.12, 1.53, 1.13, 0.91, 0.75], final: 4.11 },
   'evo-ix': { engine: '4G63T', mass: 1400, drive: 'AWD', gears: [2.92, 1.94, 1.43, 1.10, 0.88], final: 4.53 },
   'nissan-silvia-s13': { engine: 'CA18DET', mass: 1190, drive: 'FR', gears: [3.32, 1.90, 1.31, 1.00, 0.81], final: 4.11 },
+  'supra-a80': { engine: '2JZ-GTE', mass: 1490, drive: 'FR', gears: [3.83, 2.36, 1.69, 1.31, 1.00, 0.79], final: 3.27 },
+  'skyline-r34': { engine: 'RB26DETT', mass: 1560, drive: 'AWD', gears: [3.83, 2.36, 1.69, 1.31, 1.00, 0.79], final: 3.54 },
+  'rx7-fd': { engine: '13B-REW', mass: 1260, drive: 'FR', gears: [3.48, 2.02, 1.39, 1.00, 0.72], final: 4.10 },
+  ae86: { engine: '4A-GE', mass: 940, drive: 'FR', gears: [3.59, 2.02, 1.38, 1.00, 0.86], final: 4.30 },
+  'jazz-gk': { engine: 'L15Z1', mass: 1050, drive: 'FF', gears: [3.46, 1.87, 1.32, 0.97, 0.76], final: 4.62 },
+  dmax: { engine: '4JJ3-TCX', mass: 1850, drive: 'FR', gears: [4.28, 2.33, 1.44, 1.00, 0.78, 0.65], final: 3.73 },
 };
 export const carSpec = (gen) => CAR_SPECS[gen] || CAR_SPECS.gen2;
 
@@ -18,11 +24,13 @@ export const carSpec = (gen) => CAR_SPECS[gen] || CAR_SPECS.gen2;
 // hp@rpm and Nm@rpm are the stock peaks; redline is the stock rev limit; boost is stock psi.
 export const ENGINES = [
   { id: '1NZ-FE', name: '1NZ-FE 1.5 VVT-i', make: 'Toyota', cc: 1497, cyl: 4, asp: 'na', hp: 109, hpRpm: 6000, tq: 141, tqRpm: 4200, redline: 6400, kg: 0 },
+  { id: '4A-GE', name: '4A-GE 1.6 Twin-Cam 16V', make: 'Toyota', cc: 1587, cyl: 4, asp: 'na', hp: 130, hpRpm: 6600, tq: 149, tqRpm: 5200, redline: 7600, kg: 0 },
   { id: '2ZZ-GE', name: '2ZZ-GE 1.8 VVTL-i', make: 'Toyota', cc: 1796, cyl: 4, asp: 'na', hp: 190, hpRpm: 7800, tq: 180, tqRpm: 6800, redline: 8200, kg: 15 },
   { id: '3S-GTE', name: '3S-GTE 2.0 Turbo', make: 'Toyota', cc: 1998, cyl: 4, asp: 'turbo', boost: 13, hp: 245, hpRpm: 6000, tq: 304, tqRpm: 4000, redline: 7200, kg: 45 },
   { id: '1JZ-GTE', name: '1JZ-GTE 2.5 Twin Turbo', make: 'Toyota', cc: 2492, cyl: 6, asp: 'turbo', boost: 10, hp: 280, hpRpm: 6200, tq: 363, tqRpm: 4800, redline: 7200, kg: 95 },
   { id: '2JZ-GTE', name: '2JZ-GTE 3.0 Twin Turbo', make: 'Toyota', cc: 2997, cyl: 6, asp: 'turbo', boost: 12, hp: 320, hpRpm: 5600, tq: 451, tqRpm: 3600, redline: 7000, kg: 120 },
   { id: 'D16Z6', name: 'D16Z6 1.6 VTEC', make: 'Honda', cc: 1590, cyl: 4, asp: 'na', hp: 125, hpRpm: 6600, tq: 144, tqRpm: 5200, redline: 7200, kg: 0 },
+  { id: 'L15Z1', name: 'L15Z1 1.5 i-VTEC', make: 'Honda', cc: 1496, cyl: 4, asp: 'na', hp: 117, hpRpm: 6600, tq: 146, tqRpm: 4700, redline: 6800, kg: 0 },
   { id: 'B16A', name: 'B16A 1.6 DOHC VTEC', make: 'Honda', cc: 1595, cyl: 4, asp: 'na', hp: 170, hpRpm: 7800, tq: 160, tqRpm: 7300, redline: 8200, kg: 10 },
   { id: 'B18C', name: 'B18C Type R 1.8', make: 'Honda', cc: 1797, cyl: 4, asp: 'na', hp: 200, hpRpm: 8000, tq: 188, tqRpm: 7500, redline: 8400, kg: 12 },
   { id: 'R18A', name: 'R18A 1.8 i-VTEC', make: 'Honda', cc: 1799, cyl: 4, asp: 'na', hp: 140, hpRpm: 6300, tq: 174, tqRpm: 4300, redline: 6800, kg: 0 },
@@ -37,6 +45,7 @@ export const ENGINES = [
   { id: 'RB26DETT', name: 'RB26DETT 2.6 Twin Turbo', make: 'Nissan', cc: 2568, cyl: 6, asp: 'turbo', boost: 10, hp: 280, hpRpm: 6800, tq: 392, tqRpm: 4400, redline: 8000, kg: 110 },
   { id: '4G63T', name: '4G63T 2.0 MIVEC Turbo', make: 'Mitsubishi', cc: 1997, cyl: 4, asp: 'turbo', boost: 19, hp: 280, hpRpm: 6500, tq: 400, tqRpm: 3000, redline: 7500, kg: 0 },
   { id: '13B-REW', name: '13B-REW Rotary Twin Turbo', make: 'Mazda', cc: 1308, cyl: 2, rotary: true, asp: 'turbo', boost: 10, hp: 280, hpRpm: 6500, tq: 314, tqRpm: 5000, redline: 8500, kg: -10 },
+  { id: '4JJ3-TCX', name: '4JJ3-TCX 3.0 Ddi Turbo', make: 'Isuzu', cc: 2999, cyl: 4, asp: 'turbo', boost: 22, hp: 190, hpRpm: 3600, tq: 450, tqRpm: 1600, redline: 4800, kg: 60 },
 ];
 export const engineById = (id) => ENGINES.find((e) => e.id === id) || ENGINES[0];
 

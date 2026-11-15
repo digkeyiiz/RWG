@@ -7,6 +7,7 @@ export const START_MONEY = 999999999;
 // Cars you can own. The Vios is the starter car (free). Prices follow real-world desirability, not MSRP.
 export const CAR_PRICES = {
   gen2: 0, 'civic-eg': 60000, 'civic-fd': 95000, 'civic-fc': 130000, 'civic-fe': 165000, 'nissan-silvia-s13': 190000, 'evo-ix': 320000,
+  ae86: 180000, 'supra-a80': 450000, 'skyline-r34': 520000, 'rx7-fd': 420000, 'jazz-gk': 75000, dmax: 240000,
 };
 
 // engine swaps: power, forced induction and rarity

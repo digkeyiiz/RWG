@@ -213,7 +213,7 @@ export class Panel {
   // ---------- tabs ----------
   tab_gen() {
     let lastModel = null, box = null;
-    for (const g of GENERATIONS.filter((x) => x.glb)) {
+    for (const g of GENERATIONS.filter((x) => x.glb || x.featured)) {
       const model = `${g.make || 'Toyota'} ${g.model || 'Vios'}`;
       if (model !== lastModel) { if (box) this.body.append(box); this.h('🚗 ' + model); box = el('div', { class: 'cards' }); lastModel = model; }
       const saved = this.garage?.has(g.id) ? this.garage.get(g.id) : null;
