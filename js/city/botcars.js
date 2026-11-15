@@ -11,16 +11,58 @@ export const BOT_GENS = GENERATIONS.filter((g) => g.glb);
 const protos = new Map(); // gen id -> proto
 let loading = null;
 
-export const BOT_PAINTS = ['#f2f2f2', '#e9e9e9', '#c9ccd0', '#8c9096', '#2a2c30', '#141518', '#9b1b1b', '#c3262a', '#22416e', '#1f5fa8', '#3c5a3a', '#d8b03a', '#e46a1c', '#6b2f86'];
+export const BOT_PAINTS = ['#f2f2f2', '#e9e9e9', '#c9ccd0', '#8c9096', '#2a2c30', '#141518', '#9b1b1b', '#c3262a', '#22416e', '#1f5fa8', '#3c5a3a', '#d8b03a', '#e46a1c', '#6b2f86', '#0ea5e9', '#10b981'];
+export const BOT_RIMS = ['#b9bdc2', '#1c1d20', '#5a5f66', '#b88b4a', '#d4af37', '#f0f0f0', '#a31d24'];
+export const BOT_TINTS = ['#0e1318', '#05070a', '#18222c'];
+export const BOT_NEONS = ['#00e5ff', '#ff2a85', '#ffb02e', '#38ff88', '#a855f7'];
 const paintCache = new Map();
 export function paintMat(color) {
   let m = paintCache.get(color);
   if (!m) { m = new THREE.MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.32, envMapIntensity: 1.1 }); paintCache.set(color, m); }
   return m;
 }
-const glass = new THREE.MeshStandardMaterial({ color: '#0e1318', metalness: 0.7, roughness: 0.08 });
+const rimCache = new Map();
+function getRimMat(color) {
+  let m = rimCache.get(color);
+  if (!m) { m = new THREE.MeshStandardMaterial({ color, metalness: 0.85, roughness: 0.28 }); rimCache.set(color, m); }
+  return m;
+}
+const glassCache = new Map();
+function getGlassMat(color) {
+  let m = glassCache.get(color);
+  if (!m) { m = new THREE.MeshStandardMaterial({ color, metalness: 0.72, roughness: 0.08 }); glassCache.set(color, m); }
+  return m;
+}
+const glass = getGlassMat(BOT_TINTS[0]);
 const tireMat = new THREE.MeshStandardMaterial({ color: '#141414', roughness: 0.92 });
-const rimMat = new THREE.MeshStandardMaterial({ color: '#b9bdc2', metalness: 0.85, roughness: 0.3 });
+const rimMat = getRimMat(BOT_RIMS[0]);
+const carbonMat = new THREE.MeshStandardMaterial({ color: '#181a1d', metalness: 0.35, roughness: 0.38 });
+const glowCache = new Map();
+function getGlowMat(color) {
+  let m = glowCache.get(color);
+  if (!m) { m = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55, depthWrite: false }); glowCache.set(color, m); }
+  return m;
+}
+// Shared tuning accessory geometries (reused across all bots, zero per-car allocations)
+const aeroGeos = {
+  gtDeck: new THREE.BoxGeometry(0.28, 0.035, 1.44),
+  gtStanchion: new THREE.BoxGeometry(0.14, 0.22, 0.03),
+  lipSpoiler: new THREE.BoxGeometry(0.14, 0.055, 1.38),
+  frontLip: new THREE.BoxGeometry(0.16, 0.055, 1.68),
+  underglow: new THREE.PlaneGeometry(3.1, 1.35).rotateX(-Math.PI / 2),
+};
+
+export function randomBotCustom(rand = Math.random) {
+  return {
+    paint: BOT_PAINTS[Math.floor(rand() * BOT_PAINTS.length)],
+    rim: BOT_RIMS[Math.floor(rand() * BOT_RIMS.length)],
+    tint: BOT_TINTS[Math.floor(rand() * BOT_TINTS.length)],
+    wing: rand() < 0.35 ? 2 : rand() < 0.65 ? 1 : 0, // 0 none, 1 lip, 2 GT wing
+    frontLip: rand() < 0.45,
+    wingBodyColor: rand() < 0.35,
+    underglow: rand() < 0.22 ? BOT_NEONS[Math.floor(rand() * BOT_NEONS.length)] : null,
+  };
+}
 
 const inSubtree = (o, names) => { for (let p = o; p; p = p.parent) if (names.includes(p.name)) return true; return false; };
 const visibleChain = (o, root) => { for (let p = o; p && p !== root.parent; p = p.parent) if (!p.visible) return false; return true; };
@@ -133,15 +175,40 @@ export function randomProto(rand = Math.random) {
   return list.length ? list[Math.floor(rand() * list.length)] : null;
 }
 
-// a new bot body (Group, car space: +x front) with the given paint
-export function makeBotBody(proto, color, shadows = true) {
+// a new bot body (Group, car space: +x front) with the given paint & optional randomized tuning
+export function makeBotBody(proto, color, shadows = true, custom = null) {
   const g = new THREE.Group();
-  const paint = paintMat(color);
+  const c = custom || randomBotCustom();
+  const paint = paintMat(color || c.paint);
+  const rim = c.rim ? getRimMat(c.rim) : rimMat;
+  const gls = c.tint ? getGlassMat(c.tint) : glass;
   for (const p of proto.parts) {
-    const m = new THREE.Mesh(p.geo, p.key === 'paint' ? paint : p.mat);
+    const mat = p.key === 'paint' ? paint : p.key === 'rim' ? rim : p.key === 'glass' ? gls : p.mat;
+    const m = new THREE.Mesh(p.geo, mat);
     m.castShadow = shadows && p.key !== 'glass'; m.receiveShadow = false;
     m.matrixAutoUpdate = false;
     g.add(m);
+  }
+  const hl = (proto.L || 4.3) * 0.5;
+  const wingMat = c.wingBodyColor ? paint : carbonMat;
+  if (c.wing === 2) {
+    const dk = new THREE.Mesh(aeroGeos.gtDeck, wingMat);
+    dk.position.set(-hl + 0.16, 1.07, 0); dk.updateMatrix(); dk.matrixAutoUpdate = false; g.add(dk);
+    for (const sz of [-0.46, 0.46]) {
+      const st = new THREE.Mesh(aeroGeos.gtStanchion, carbonMat);
+      st.position.set(-hl + 0.17, 0.95, sz); st.updateMatrix(); st.matrixAutoUpdate = false; g.add(st);
+    }
+  } else if (c.wing === 1) {
+    const lp = new THREE.Mesh(aeroGeos.lipSpoiler, wingMat);
+    lp.position.set(-hl + 0.12, 0.89, 0); lp.updateMatrix(); lp.matrixAutoUpdate = false; g.add(lp);
+  }
+  if (c.frontLip) {
+    const fl = new THREE.Mesh(aeroGeos.frontLip, carbonMat);
+    fl.position.set(hl - 0.04, 0.14, 0); fl.updateMatrix(); fl.matrixAutoUpdate = false; g.add(fl);
+  }
+  if (c.underglow) {
+    const ug = new THREE.Mesh(aeroGeos.underglow, getGlowMat(c.underglow));
+    ug.position.set(0, 0.05, 0); ug.updateMatrix(); ug.matrixAutoUpdate = false; g.add(ug);
   }
   g.userData = { L: proto.L, W: proto.W, gen: proto.gen.id, name: proto.gen.name };
   return g;

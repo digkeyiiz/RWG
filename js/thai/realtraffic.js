@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { roadY, elevAt, laneCount } from './roadmesh.js';
+import { botReady, makeBotBody, randomBotCustom } from '../city/botcars.js';
 
 const DRIVABLE = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary']);
 const LANE_W = 3.3;
@@ -114,8 +115,14 @@ export class RealTraffic {
         z: 0,
         tx: 1,
         tz: 0,
+        pick: Math.random(),
+        custom: randomBotCustom(),
+        real: null,
+        realGen: null,
       });
     }
+    this._lodT = 0;
+    this._nearLimit = Math.min(16, Math.max(6, Math.round(this.count * 0.35)));
 
     this._dummy = new THREE.Object3D();
     this._zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -382,6 +389,7 @@ export class RealTraffic {
       }
 
       if (!car.active) {
+        if (car.real) car.real.visible = false;
         for (const m of this._meshes) m.setMatrixAt(i, this._zeroMat);
         continue;
       }
@@ -429,14 +437,53 @@ export class RealTraffic {
 
       this._placeCar(car);
 
-      dummy.position.set(car.x, car.y, car.z);
-      dummy.rotation.set(0, Math.atan2(-car.tz, car.tx), 0);
-      dummy.scale.set(1, 1, 1);
-      dummy.updateMatrix();
-      for (const m of this._meshes) m.setMatrixAt(i, dummy.matrix);
+      if (car.real && car.real.visible) {
+        car.real.position.set(car.x, car.y, car.z);
+        car.real.rotation.y = Math.atan2(-car.tz, car.tx);
+        for (const m of this._meshes) m.setMatrixAt(i, this._zeroMat);
+      } else {
+        dummy.position.set(car.x, car.y, car.z);
+        dummy.rotation.set(0, Math.atan2(-car.tz, car.tx), 0);
+        dummy.scale.set(1, 1, 1);
+        dummy.updateMatrix();
+        for (const m of this._meshes) m.setMatrixAt(i, dummy.matrix);
+      }
+    }
+
+    this._lodT -= clampedDt;
+    if (this._lodT <= 0) {
+      this._lodT = 0.4;
+      this._updateLOD(px, pz);
     }
 
     for (const m of this._meshes) m.instanceMatrix.needsUpdate = true;
+  }
+
+  _updateLOD(px, pz) {
+    const protos = botReady();
+    if (!protos.length) return;
+    const near = [];
+    for (const c of this.cars) {
+      if (!c.active) { if (c.real) c.real.visible = false; continue; }
+      const d2 = (c.x - px) ** 2 + (c.z - pz) ** 2;
+      if (d2 < 320 * 320) near.push([d2, c]);
+      else if (c.real) c.real.visible = false;
+    }
+    near.sort((a, b) => a[0] - b[0]);
+    const show = new Set(near.slice(0, this._nearLimit).map(([, c]) => c));
+    for (const [, c] of near) {
+      const on = show.has(c);
+      if (on && !c.real) {
+        const pr = protos[Math.floor(c.pick * protos.length)];
+        c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
+        c.realCount = protos.length;
+        this.group.add(c.real);
+      } else if (on && c.real && c.realCount < protos.length && Math.random() < 0.05) {
+        this.group.remove(c.real);
+        c.real = null;
+      }
+      if (c.real) c.real.visible = on;
+    }
   }
 
   collide(x, z, r, y = 0) {
