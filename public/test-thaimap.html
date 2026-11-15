@@ -1,0 +1,49 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ThaiMap test</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#000;font:12px monospace;color:#fff}
+#hud{position:fixed;left:8px;top:8px;background:#0008;padding:6px;white-space:pre}
+#mm{position:fixed;right:8px;top:8px;border:1px solid #fff8;background:#111}</style>
+<script type="importmap">{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }</script>
+</head><body>
+<div id="hud">loading…</div><canvas id="mm" width="240" height="240"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ThaiMap } from './js/thai/thaimap.js';
+import { drawThaiMinimap } from './js/thai/minimapLayer.js';
+const q = new URLSearchParams(location.search);
+const data = q.get('data') || 'data/';
+const sx = +(q.get('x') || 0), sz = +(q.get('z') || 0);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight); renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9bbbd8); scene.fog = new THREE.Fog(0x9bbbd8, 800, 6000);
+const cam = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.5, 30000);
+cam.position.set(sx + 150, 120, sz + 250);
+const ctl = new OrbitControls(cam, renderer.domElement); ctl.target.set(sx, 0, sz); ctl.maxPolarAngle = Math.PI * 0.499;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x556655, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(300, 500, 200); scene.add(sun);
+const tm = new ThaiMap(scene, { quality: +(q.get('quality') || 2) });
+window.tm = tm;
+const hud = document.getElementById('hud'), mm = document.getElementById('mm').getContext('2d');
+let night = 0, mscale = 0.15;
+addEventListener('keydown', e => {
+  if (e.key === 'n') { night = night ? 0 : 1; tm.setNight(night); scene.background.set(night ? 0x0a1020 : 0x9bbbd8); scene.fog.color.copy(scene.background); sun.intensity = night ? 0.1 : 1.6; }
+  if (e.key === '+') mscale *= 1.5; if (e.key === '-') mscale /= 1.5;
+});
+tm.load(data).then(r => { hud.textContent = 'loaded ' + JSON.stringify(r); tm.warm(ctl.target); });
+let last = performance.now();
+function loop() {
+  requestAnimationFrame(loop);
+  const now = performance.now(), dt = (now - last) / 1000; last = now;
+  ctl.update(); tm.update(cam.position, dt);
+  const t = ctl.target, r = tm.roadAt(t.x, t.z);
+  if (tm.loaded) hud.textContent = `chunks ${tm.stats.chunks}  lastBuild ${tm.stats.lastBuildMs.toFixed(1)}ms  night(N) ${night}\ntarget ${t.x.toFixed(0)},${t.z.toFixed(0)}  groundH ${tm.groundHeight(t.x, t.z).toFixed(1)}\nroad ${r ? `${r.c} "${r.n}" ${r.ref} lanes${r.lanes} d=${r.dist.toFixed(1)} elev=${r.elev.toFixed(1)}` : '-'}\ndraw calls ${renderer.info.render.calls} tris ${renderer.info.render.triangles}`;
+  mm.fillStyle = '#1b1f1b'; mm.fillRect(0, 0, 240, 240);
+  drawThaiMinimap(mm, tm, t.x, t.z, mscale, 0);
+  renderer.render(scene, cam);
+}
+loop();
+addEventListener('resize', () => { cam.aspect = innerWidth / innerHeight; cam.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+</script></body></html>

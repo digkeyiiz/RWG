@@ -2,3 +2,5 @@ node_modules/
 store/
 .DS_Store
 *.log
+
+tools/_*.raw.json
