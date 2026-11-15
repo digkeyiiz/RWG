@@ -350,19 +350,65 @@ export function chevronSignTexture() {
 
 // ---------------------------------------------------------------- ground
 export function asphaltTexture() {
-  return tex(256, 256, (g, W, H) => {
-    g.fillStyle = '#43464b'; g.fillRect(0, 0, W, H);
-    for (let i = 0; i < 9000; i++) { const v = 42 + Math.random() * 52; g.fillStyle = `rgb(${v},${v},${v + 2})`; g.fillRect(Math.random() * W, Math.random() * H, 1.4, 1.4); }
-    g.strokeStyle = 'rgba(22,22,26,0.35)'; g.lineWidth = 1.5;
-    for (let i = 0; i < 6; i++) { g.beginPath(); let x = Math.random() * W, y = Math.random() * H; g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (Math.random() - 0.5) * 40; y += (Math.random() - 0.5) * 40; g.lineTo(x, y); } g.stroke(); }
+  return tex(512, 512, (g, W, H) => {
+    g.fillStyle = '#26292e'; g.fillRect(0, 0, W, H);
+    // multi-scale mineral aggregate grain
+    for (let i = 0; i < 24000; i++) {
+      const v = 26 + ((Math.random() * 44) | 0);
+      g.fillStyle = `rgb(${v},${v + 1},${v + 3})`;
+      g.fillRect(Math.random() * W, Math.random() * H, 1.5, 1.5);
+    }
+    // subtle bright quartz flecks catching headlights/sun
+    for (let i = 0; i < 1600; i++) {
+      const v = 78 + ((Math.random() * 48) | 0);
+      g.fillStyle = `rgba(${v},${v + 2},${v + 6},0.45)`;
+      g.fillRect(Math.random() * W, Math.random() * H, 1.2, 1.2);
+    }
+    // longitudinal worn tire polish tracks
+    g.fillStyle = 'rgba(14,16,20,0.22)';
+    for (const tx of [96, 192, 320, 416]) {
+      g.fillRect(tx - 18, 0, 36, H);
+    }
+    // patched bitumen repairs and micro-cracks
+    g.fillStyle = 'rgba(18,19,22,0.25)';
+    for (let i = 0; i < 4; i++) {
+      g.fillRect(Math.random() * (W - 70), Math.random() * (H - 90), 38 + Math.random() * 44, 48 + Math.random() * 64);
+    }
+    g.strokeStyle = 'rgba(12,12,15,0.48)'; g.lineWidth = 1.4;
+    for (let i = 0; i < 14; i++) {
+      g.beginPath();
+      let x = Math.random() * W, y = Math.random() * H;
+      g.moveTo(x, y);
+      for (let k = 0; k < 8; k++) { x += (Math.random() - 0.5) * 48; y += (Math.random() - 0.5) * 48; g.lineTo(x, y); }
+      g.stroke();
+    }
   });
 }
 export function pavingTexture() {
-  return tex(128, 128, (g, W, H) => {
-    g.fillStyle = '#9b958c'; g.fillRect(0, 0, W, H);
-    noise(g, W, H, 800, 110, 170);
-    g.strokeStyle = 'rgba(60,55,50,0.45)'; g.lineWidth = 2;
-    for (let k = 0; k <= 4; k++) { g.beginPath(); g.moveTo(0, k * 32); g.lineTo(W, k * 32); g.stroke(); g.beginPath(); g.moveTo(k * 32, 0); g.lineTo(k * 32, H); g.stroke(); }
+  return tex(256, 256, (g, W, H) => {
+    g.fillStyle = '#979087'; g.fillRect(0, 0, W, H);
+    noise(g, W, H, 2800, 108, 168);
+    // staggered concrete paver tiles (running bond)
+    const rows = 8, cols = 4, rh = H / rows, cw = W / cols;
+    for (let r = 0; r < rows; r++) {
+      const off = (r & 1) ? cw * 0.5 : 0;
+      for (let c = -1; c <= cols; c++) {
+        const x = c * cw + off, y = r * rh;
+        const shade = ((r * 7 + c * 13) & 3) * 4 - 6;
+        g.fillStyle = `rgba(${150 + shade},${143 + shade},${134 + shade},0.35)`;
+        g.fillRect(x + 2, y + 2, cw - 4, rh - 4);
+        g.strokeStyle = 'rgba(54,50,46,0.52)'; g.lineWidth = 2;
+        g.strokeRect(x, y, cw, rh);
+      }
+    }
+    // subtle weathered damp spots
+    g.fillStyle = 'rgba(55,58,52,0.14)';
+    for (let i = 0; i < 6; i++) g.fillRect(Math.random() * W, Math.random() * H, 26, 22);
+    // Thai sidewalk yellow tactile blind-guide strip near inner tile row
+    g.fillStyle = '#c89e2c';
+    g.fillRect(0, 8, W, 24);
+    g.fillStyle = 'rgba(95,70,15,0.45)';
+    for (let x = 4; x < W; x += 12) g.fillRect(x, 12, 4, 16);
   });
 }
 export function grassTexture() {

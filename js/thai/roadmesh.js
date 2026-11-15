@@ -125,14 +125,29 @@ export function makeRoadTexture(key, aniso = 4) {
       const fleck = (rnd & 127) === 0 ? 11 : (rnd & 127) === 1 ? -9 : 0;
 
       if (sideW > 0 && (xm < sideW || xm > widthM - sideW)) {
-        // Concrete sidewalk + raised curb + gutter shadow
+        // Concrete sidewalk + Thai painted curb (red/white major, black/white secondary) + gutter shadow
         const dOut = Math.min(xm, widthM - xm);
         const dIn = sideW - dOut;
+        if (dIn >= 0.04 && dIn < 0.17 && !isCurbJoint) {
+          const alt = (Math.floor(y / curbPeriod) & 1) === 0;
+          let cr, cg, cb;
+          if (lanes >= 4) {
+            [cr, cg, cb] = alt ? [178, 46, 42] : [206, 204, 198];
+          } else {
+            [cr, cg, cb] = alt ? [46, 48, 54] : [202, 200, 194];
+          }
+          const dv = (grain * 0.6 + fleck * 0.4) | 0;
+          d[idx] = Math.max(0, Math.min(255, cr + dv));
+          d[idx + 1] = Math.max(0, Math.min(255, cg + dv));
+          d[idx + 2] = Math.max(0, Math.min(255, cb + dv));
+          d[idx + 3] = 255;
+          continue;
+        }
         let base = 116;
         if (dIn < 0.04) {
           base = 44; // gutter shadow
         } else if (dIn < 0.17) {
-          base = isCurbJoint ? 92 : 134; // raised curb stone
+          base = 92; // curb block joint
         } else {
           if (isSlabJoint) base -= 16;
           if (dOut < 0.09) base -= 14; // grass-edge darkening
@@ -181,18 +196,33 @@ export function makeRoadTexture(key, aniso = 4) {
     const m = (x) => (sideW + x) * PPM, lw = 0.14 * PPM;
     const line = (xm, col, w) => { g.fillStyle = col; g.fillRect(m(xm) - w / 2, 0, w, H); };
     const dash = (xm, col) => { g.fillStyle = col; g.fillRect(m(xm) - lw / 2, 0, lw, H * (3 / DASH_CYCLE)); };
+    const stud = (xm, yFrac, glowCol) => {
+      const sx = m(xm), sy = Math.round(H * yFrac);
+      g.fillStyle = '#47505a';
+      g.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+      g.fillStyle = glowCol;
+      g.fillRect(sx - 1.0, sy - 1.0, 2, 2);
+    };
     g.globalAlpha = 0.92;
     line(0.5 + 0.08, '#ebebea', lw); line(roadW - 0.58, '#ebebea', lw);   // edge lines
     if (oneway) {
-      for (let k = 1; k < lanes; k++) dash(0.5 + k * LANE_W, '#ebebea');
+      for (let k = 1; k < lanes; k++) {
+        dash(0.5 + k * LANE_W, '#ebebea');
+        stud(0.5 + k * LANE_W, 0.67, '#eefaff');
+      }
     } else {
       const cx = roadW / 2;
       if (lanes >= 2) {
         line(cx - 0.12, '#eab600', lw * 0.9); line(cx + 0.12, '#eab600', lw * 0.9);   // double yellow centre
+        stud(cx, 0.17, '#ffd54f'); stud(cx, 0.67, '#ffd54f');
         const per = lanes / 2;
-        for (let k = 1; k < per; k++) { dash(cx - k * LANE_W, '#ebebea'); dash(cx + k * LANE_W, '#ebebea'); }
+        for (let k = 1; k < per; k++) {
+          dash(cx - k * LANE_W, '#ebebea'); dash(cx + k * LANE_W, '#ebebea');
+          stud(cx - k * LANE_W, 0.67, '#eefaff'); stud(cx + k * LANE_W, 0.67, '#eefaff');
+        }
       } else {
         dash(cx, '#eab600');
+        stud(cx, 0.67, '#ffd54f');
       }
     }
     g.globalAlpha = 1.0;

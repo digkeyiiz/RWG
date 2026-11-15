@@ -159,6 +159,7 @@ export class City {
     this.buildRail();
     this.buildHarbor();
     this.buildOutskirts();
+    this.buildOverpasses();
 
     // world bounds
     const B = L.bounds;
@@ -853,6 +854,84 @@ export class City {
     }
     this.spawns.push({ name: 'ลาดพร้าว', label: 'ย่านลาดพร้าว', x: -200, y: 0, z: 160 - 2.4, heading: 0 });
     this.spawns.push({ name: 'พระราม 9', label: 'ถนนพระราม 9 - รัชดา', x: -96 - 4.5, y: 0, z: 150, heading: Math.PI / 2 });
+  }
+
+  // Bangkok Covered Pedestrian Overpasses (สะพานลอยข้ามถนนหลัก)
+  buildOverpasses() {
+    const b = this.buf;
+    const spots = [
+      [-96, -192, 'x', 0],
+      [96, 192, 'x', 1],
+      [192, -96, 'z', 2],
+      [-192, 96, 'z', 3],
+    ];
+    const hw = 9; // half-width of L.main 18m avenues
+    for (const [cx, cz, axis, slot] of spots) {
+      const ux = axis === 'x' ? 1 : 0, uz = axis === 'x' ? 0 : 1;
+      const tx = axis === 'x' ? 0 : 1, tz = axis === 'x' ? 1 : 0;
+      const boxCoords = (u0, u1, t0, t1) => {
+        const ax = cx + ux * u0 + tx * t0, bx = cx + ux * u1 + tx * t1;
+        const az = cz + uz * u0 + tz * t0, bz = cz + uz * u1 + tz * t1;
+        return [Math.min(ax, bx), Math.max(ax, bx), Math.min(az, bz), Math.max(az, bz)];
+      };
+      const addBox = (buf, u0, u1, t0, t1, y0, y1, su = 2, sv = 2) => {
+        const [x0, x1, z0, z1] = boxCoords(u0, u1, t0, t1);
+        buf.boxWalls(x0, x1, z0, z1, y0, y1, su, sv);
+        buf.top(x0, x1, z0, z1, y1, su);
+      };
+
+      // 1. Elevated walkway deck (6.2m clear headroom for trucks/traffic)
+      const [dx0, dx1, dz0, dz1] = boxCoords(-10.6, 10.6, -1.4, 1.4);
+      b.concrete.boxWalls(dx0, dx1, dz0, dz1, 6.2, 6.75, 4, 2);
+      b.concrete.top(dx0, dx1, dz0, dz1, 6.75, 4);
+      b.concrete.quad([dx0, 6.2, dz0], [dx1, 6.2, dz0], [dx1, 6.2, dz1], [dx0, 6.2, dz1], [0, -1, 0], [0, 0], [4, 0], [4, 1], [0, 1]);
+
+      // 2. Side concrete parapets, steel handrails & pitched/shaded canopy roof
+      for (const sgn of [-1, 1]) {
+        const tA = sgn > 0 ? 1.18 : -1.4, tB = sgn > 0 ? 1.4 : -1.18;
+        addBox(b.concrete, -10.55, 10.55, tA, tB, 6.75, 7.45, 2, 1);
+        addBox(b.metal, -10.55, 10.55, sgn * 1.24 - 0.05, sgn * 1.24 + 0.05, 7.75, 7.88, 2, 1);
+        for (const pu of [-9.8, -4.9, 0, 4.9, 9.8]) {
+          addBox(b.metal, pu - 0.07, pu + 0.07, sgn * 1.28 - 0.07, sgn * 1.28 + 0.07, 7.45, 9.05, 1, 1);
+        }
+      }
+      const [rx0, rx1, rz0, rz1] = boxCoords(-10.85, 10.85, -1.55, 1.55);
+      b.metal.boxWalls(rx0, rx1, rz0, rz1, 9.05, 9.3, 4, 1);
+      b.metal.top(rx0, rx1, rz0, rz1, 9.3, 4);
+      b.metal.quad([rx0, 9.05, rz0], [rx1, 9.05, rz0], [rx1, 9.05, rz1], [rx0, 9.05, rz1], [0, -1, 0], [0, 0], [4, 0], [4, 1], [0, 1]);
+
+      // 3. Support piers & sidewalk staircases placed cleanly on sidewalks (|u| >= hw + 0.75)
+      for (const sgn of [-1, 1]) {
+        const u0 = sgn * (hw + 0.75), u1 = sgn * (hw + 1.55);
+        addBox(b.concrete, Math.min(u0, u1), Math.max(u0, u1), -1.1, 1.1, CURB, 6.2, 2, 2);
+        const [px0, px1, pz0, pz1] = boxCoords(Math.min(u0, u1), Math.max(u0, u1), -1.1, 1.1);
+        this.colliders.addBox(px0, px1, pz0, pz1, -5, 7);
+
+        // Stepped concrete stair run descending along the sidewalk
+        const su0 = Math.min(sgn * (hw + 0.65), sgn * (hw + 1.85));
+        const su1 = Math.max(sgn * (hw + 0.65), sgn * (hw + 1.85));
+        for (let st = 0; st < 6; st++) {
+          const st0 = 1.4 + st * 1.12, st1 = st0 + 1.15;
+          const topY = Math.max(0.85, 6.2 - st * 0.96);
+          addBox(b.concrete, su0, su1, st0, st1, CURB, topY, 1, 1);
+        }
+        const [sx0, sx1, sz0, sz1] = boxCoords(su0, su1, 1.4, 8.2);
+        this.colliders.addBox(sx0, sx1, sz0, sz1, -5, 6.5);
+      }
+
+      // 4. Illuminated Bangkok overpass directional / civic banners on both road-facing faces
+      const v0 = 1 - (slot + 1) * 0.25, v1 = 1 - slot * 0.25;
+      for (const fDir of [-1, 1]) {
+        const ft = fDir * 1.46;
+        let pA = [cx + ux * -7.4 + tx * ft, cz + uz * -7.4 + tz * ft];
+        let pB = [cx + ux * 7.4 + tx * ft, cz + uz * 7.4 + tz * ft];
+        const dx = pB[0] - pA[0], dz = pB[1] - pA[1];
+        if ((-dz) * (tx * fDir) + dx * (tz * fDir) < 0) [pA, pB] = [pB, pA];
+        b.gantrySign.wall(pA, pB, 6.18, 7.38, 0, 1, 1, 0, null, [0, v0, 1, v1]);
+      }
+
+      this.spawnLight(cx, cz, 14, '#fde68a', 0.04);
+    }
   }
 
   // ------------------------------------------------------------ instanced props

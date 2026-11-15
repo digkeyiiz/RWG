@@ -115,6 +115,7 @@ export class RealTraffic {
         z: 0,
         tx: 1,
         tz: 0,
+        idx: i,
         pick: Math.random(),
         custom: randomBotCustom(),
         real: null,
@@ -122,7 +123,7 @@ export class RealTraffic {
       });
     }
     this._lodT = 0;
-    this._nearLimit = Math.min(5, Math.max(3, Math.round(this.count * 0.15)));
+    this._nearLimit = Math.min(16, Math.max(8, Math.round(this.count * 0.35)));
 
     this._dummy = new THREE.Object3D();
     this._zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -453,7 +454,7 @@ export class RealTraffic {
     setBotLights(night);
     this._lodT -= clampedDt;
     if (this._lodT <= 0) {
-      this._lodT = 0.4;
+      this._lodT = 0.15;
       this._updateLOD(px, pz);
     }
 
@@ -475,12 +476,13 @@ export class RealTraffic {
     let built = 0;
     for (const [, c] of near) {
       const on = show.has(c);
-      if (on && c.real && c.realCount < protos.length && built === 0 && Math.random() < 0.08) {
+      if (on && c.real && c.realCount < protos.length && built < 4) {
         this.group.remove(c.real);
         c.real = null;
       }
-      if (on && !c.real && built < 1) {
-        const pr = protos[Math.floor(c.pick * protos.length)];
+      if (on && !c.real && built < 4) {
+        const idx = ((c.idx || 0) + Math.floor(c.pick * protos.length)) % protos.length;
+        const pr = protos[idx];
         c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
         c.realCount = protos.length;
         this.group.add(c.real);

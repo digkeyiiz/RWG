@@ -51,7 +51,8 @@ export class Traffic {
     car.mesh.userData = { ...simple.userData };
     car.simple = simple;
     car.color = '#' + simple.children[0].material.color.getHexString();
-    car.eligible = type !== 'truck';
+    car.idx = this.cars.length;
+    car.eligible = true;
     car.pick = this.r();
     car.custom = randomBotCustom(this.r);
     car.real = null;
@@ -132,17 +133,18 @@ export class Traffic {
       near.push([d, c]);
     }
     near.sort((a, b) => a[0] - b[0]);
-    const lim = Math.min(5, this.opts.nearN || 5);
-    const show = new Set(near.slice(0, lim).filter(([d]) => d < 150 * 150).map(([, c]) => c));
+    const lim = this.opts.nearN ?? 14;
+    const show = new Set(near.slice(0, lim).filter(([d]) => d < 220 * 220).map(([, c]) => c));
     let built = 0;
     for (const [, c] of near) {
       const on = show.has(c);
-      if (on && c.real && c.realCount < protos.length && built === 0 && Math.random() < 0.08) {
+      if (on && c.real && c.realCount < protos.length && built < 4) {
         c.mesh.remove(c.real);
         c.real = null;
       }
-      if (on && !c.real && built < 1) {
-        const pr = protos[Math.floor(c.pick * protos.length)];
+      if (on && !c.real && built < 4) {
+        const idx = ((c.idx || 0) + Math.floor(c.pick * protos.length)) % protos.length;
+        const pr = protos[idx];
         c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
         c.realCount = protos.length;
         c.mesh.add(c.real);
@@ -156,7 +158,7 @@ export class Traffic {
 
   update(dt, player, night) {
     this.lodT -= dt;
-    if (this.lodT <= 0) { this.lodT = 0.35; this.updateLOD(player); }
+    if (this.lodT <= 0) { this.lodT = 0.15; this.updateLOD(player); }
     setBotLights(night);
     const st = this.city.signalState(this.city.time);
     lightMats.head.emissiveIntensity = 0.2 + night * 3;

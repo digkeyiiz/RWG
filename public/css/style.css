@@ -455,3 +455,17 @@ body.inspecting #hud, body.inspecting #prompt { display: none !important; }
 #inspect { left: auto; right: 14px; top: 64px; bottom: auto; transform: none; width: min(340px, 46vw); }
 #inspect .in-stats, #inspect [class*=stats] { grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 640px) { #inspect { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; } }
+/* AAA road name badge & driving stunt combo HUD */
+#roadBadge { max-width: 190px; margin: 0 0 6px; padding: 5px 10px; border-radius: 10px; background: rgba(10,14,22,0.82); border: 1px solid rgba(76,195,255,0.32); backdrop-filter: blur(8px); font-size: 12px; font-weight: 600; color: #e8f3ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.35); }
+#skillHud { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); z-index: 7; min-width: 220px; max-width: min(340px, 84vw); padding: 8px 14px; border-radius: 12px; background: linear-gradient(135deg, rgba(10,16,28,0.88), rgba(16,24,40,0.82)); border: 1px solid rgba(76,195,255,0.45); backdrop-filter: blur(8px); box-shadow: 0 6px 24px rgba(0,0,0,0.45); text-align: center; pointer-events: none; transition: transform .15s ease; }
+#skillHud.fail { border-color: rgba(255,79,109,0.75); background: rgba(55,10,18,0.9); }
+.sk-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; letter-spacing: 0.4px; }
+.sk-lbl { color: #9ee6ff; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+#skillHud.fail .sk-lbl { color: #ff7a8f; }
+.sk-mul { color: var(--gold, #ffc23a); font: 800 15px Kanit, sans-serif; font-style: italic; }
+.sk-pts { font: 900 24px/1.15 Kanit, sans-serif; font-style: italic; color: #fff; text-shadow: 0 2px 10px rgba(76,195,255,0.45); margin: 2px 0 6px; }
+#skillHud.fail .sk-pts { color: #ff6b81; text-shadow: none; }
+.sk-bar { height: 4px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+.sk-bar i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #38bdf8, #ffc23a); }
+#skillHud.fail .sk-bar i { background: #ff4f6d; }
+@media (max-width: 820px), (pointer: coarse) { #skillHud { top: 48px; min-width: 185px; padding: 6px 11px; } .sk-pts { font-size: 20px; } #roadBadge { max-width: 155px; font-size: 11px; padding: 4px 8px; } }

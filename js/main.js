@@ -304,7 +304,7 @@ async function ensureCity() {
   race.setWorld(city, touge);
   game.buildMarkers(race.tracks, touge);
   ld.classList.add('hide');
-  if (gfx.get('bots') === 'real') setTimeout(loadBots, 1500);
+  if (gfx.get('bots') === 'real') setTimeout(loadBots, 80);
   return C;
 }
 
@@ -314,7 +314,7 @@ function rebuildTraffic() {
   if (C.traffic) { scene.remove(C.traffic.group); C.traffic = null; }
   const [n, ring] = TRAFFIC[gfx.get('traffic')];
   if (n + ring > 0) {
-    C.traffic = new C.Traffic(C.city, n, ring, 7, { real: gfx.get('bots') === 'real', nearN: gfx.get('preset') === 'low' ? 0 : isMobile ? 5 : 9, shadows: gfx.get('shadows') !== 'off' });
+    C.traffic = new C.Traffic(C.city, n, ring, 7, { real: gfx.get('bots') === 'real', nearN: gfx.get('preset') === 'low' ? 6 : isMobile ? 10 : 18, shadows: gfx.get('shadows') !== 'off' });
     scene.add(C.traffic.group);
   }
   syncTraffic();
@@ -406,7 +406,12 @@ async function setMode(m, spawn = null) {
     sun.position.set(4, 8, 3); sun.target.position.set(0, 0, 0);
     const [p, t] = presets.front34(); camera.position.copy(p); controls.target.copy(t);
   }
+  syncInset();
 }
+// in the garage the tuning panel covers the left of the screen: shift the view so the car sits in the free area
+function syncInset() { world.setViewInset(mode === 'garage' && innerWidth > 820 ? 374 : 0); }
+window.addEventListener('resize', syncInset);
+syncInset();
 document.getElementById('timeSlider').oninput = (e) => { hour = +e.target.value; };
 document.getElementById('btnTimeAuto').onclick = (e) => { timeAuto = !timeAuto; e.currentTarget.classList.toggle('on', timeAuto); };
 document.getElementById('btnBloom').onclick = () => gfx.set('bloom', !gfx.get('bloom'));
@@ -527,7 +532,98 @@ const CAM = { near: [-5.2, 1.9], normal: [-6.2, 2.2], far: [-7.6, 2.7] };
 const baseFov = () => (camera.aspect < 0.8 ? 64 : camera.aspect < 1.2 ? 50 : 38);
 const clock = new THREE.Clock();
 const lastCarPos = new THREE.Vector3();
-let mmT = 0;
+let mmT = 0, roadT = 0, lastRoadTxt = '';
+const roadBadgeEl = document.getElementById('roadBadge');
+const skillHudEl = document.getElementById('skillHud');
+const skLbl = skillHudEl.querySelector('.sk-lbl');
+const skMul = skillHudEl.querySelector('.sk-mul');
+const skPts = skillHudEl.querySelector('.sk-pts');
+const skBar = skillHudEl.querySelector('.sk-bar i');
+const ROAD_CLS_TH = { motorway: 'ทางด่วน', trunk: 'ทางหลวง', primary: 'ถนนหลัก', secondary: 'ถนนรอง', tertiary: 'ซอยหลัก' };
+const skill = { pts: 0, mult: 1, timer: 0, failT: 0, lbl: '', nearMap: new Map() };
+function bkkRoadName(x, z, y) {
+  if (y > 5.5) return '🛣️ ทางด่วนพิเศษศรีรัช (ยกระดับ)';
+  if (x < -560) return '⛰️ เส้นทางขึ้นเขา Touge';
+  if (x > 365) return '🚢 ท่าเรือคลองเตย · กรุงเทพฯ';
+  if (Math.abs(z) < 28 && Math.abs(x) < 330) return '🚄 ถนนสาย BTS อโศก-สยาม';
+  if (Math.abs(z + 96) < 14 || Math.abs(z - 96) < 14 || Math.abs(x + 96) < 14 || Math.abs(x - 96) < 14) return '🚦 ถนนพระราม 9 - รัชดาฯ';
+  return '🏙️ ย่านลาดพร้าว · กรุงเทพฯ';
+}
+function formatRoadBadge(rm, x, z, y) {
+  if (!rm) return bkkRoadName(x, z, y);
+  const rd = rm.roadAt(x, z);
+  if (!rd) return cityMap === 'jp' ? '🗻 ญี่ปุ่น · นอกถนน' : '🇹🇭 ไทย · นอกถนน';
+  const kind = ROAD_CLS_TH[rd.c] || 'ซอย';
+  const name = rd.n || (rd.ref ? `${kind} ${rd.ref}` : kind);
+  const pref = rd.ref && rd.n && !rd.n.includes(rd.ref) ? `${rd.ref} · ` : '';
+  return `📍 ${pref}${name}${rd.elev ? ' 🌉' : ''}`;
+}
+function updateSkillHud(dt, kmh, slide, impact, rm, cp) {
+  if (skill.failT > 0) {
+    skill.failT -= dt;
+    if (skill.failT <= 0) { skillHudEl.hidden = true; skillHudEl.classList.remove('fail'); }
+    else skBar.style.width = `${Math.max(0, (skill.failT / 0.9) * 100)}%`;
+    return;
+  }
+  if (impact > 1.2 && skill.pts > 0) {
+    skill.pts = 0; skill.mult = 1; skill.timer = 0; skill.failT = 0.9;
+    skillHudEl.hidden = false; skillHudEl.classList.add('fail');
+    skLbl.textContent = '💥 ชน! คอมโบขาด'; skMul.textContent = 'x1.0'; skPts.textContent = '+0'; skBar.style.width = '100%';
+    return;
+  }
+  let active = false, tag = '';
+  if (slide > 0.28 && kmh > 45) {
+    skill.pts += dt * kmh * 2.4;
+    skill.mult = Math.min(5, skill.mult + dt * 0.35);
+    tag = '🔥 DRIFT'; active = true;
+  }
+  if (kmh > 155) {
+    skill.pts += dt * (kmh - 140) * 1.8;
+    skill.mult = Math.min(5, skill.mult + dt * 0.18);
+    tag = tag ? `${tag} · ⚡ HIGH SPEED` : '⚡ HIGH SPEED'; active = true;
+  }
+  const cars = rm ? realTraffic?.cars : (trafficActive() ? C?.traffic?.cars : null);
+  if (cars && kmh > 80) {
+    const nowMs = performance.now();
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      if ((rm && !c.active) || c.x === undefined || Math.abs((c.y || 0) - (driver.y || 0)) > 3.0) continue;
+      const d2 = (c.x - cp.x) ** 2 + (c.z - cp.z) ** 2;
+      if (d2 < 3.8 * 3.8 && (nowMs - (skill.nearMap.get(c) || 0)) > 4000) {
+        skill.nearMap.set(c, nowMs);
+        skill.pts += 180;
+        skill.mult = Math.min(5, skill.mult + 0.5);
+        tag = '💨 NEAR MISS!'; active = true;
+        break;
+      }
+    }
+  }
+  if (active) {
+    skill.timer = 2.6;
+    if (tag) skill.lbl = tag;
+  } else if (skill.pts > 0) {
+    skill.timer -= dt;
+    if (skill.timer <= 0) {
+      const banked = Math.round(skill.pts * skill.mult);
+      skill.pts = 0; skill.mult = 1; skill.timer = 0; skillHudEl.hidden = true;
+      if (banked >= 150) {
+        game.popGain(`+${banked.toLocaleString()} STUNT`, banked >= 1500);
+        game.sound(banked >= 1500 ? 'big' : 'cash');
+        if (banked >= 1200) game.feed(`🏆 คอมโบ <b>${skill.lbl || 'STUNT'}</b> +${banked.toLocaleString()} PTS`, 'gold');
+      }
+      return;
+    }
+  }
+  if (skill.pts > 0) {
+    skillHudEl.hidden = false; skillHudEl.classList.remove('fail');
+    skLbl.textContent = skill.lbl || 'STUNT';
+    skMul.textContent = `x${skill.mult.toFixed(1)}`;
+    skPts.textContent = `+${Math.round(skill.pts).toLocaleString()}`;
+    skBar.style.width = `${Math.max(0, Math.min(100, (skill.timer / 2.6) * 100))}%`;
+  } else {
+    skillHudEl.hidden = true;
+  }
+}
 function frame(now) {
   requestAnimationFrame(frame);
   if (!gov.tick(now ?? performance.now())) return;
@@ -623,9 +719,20 @@ function frame(now) {
     if (s.nos !== null) { nosI.style.width = `${Math.round(s.nos * 100)}%`; nosBar.classList.toggle('on', !!s.nosOn); }
     const fov = baseFov() + (gfx.get('fovKick') ? Math.min(9, s.kmh * 0.045) + (s.nosOn ? 5 : 0) : 0);
     if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
-    if (mode === 'city' && !activeRealMap()) {
-      game.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z }, driver.vel.length(), mode);
+    if (mode === 'city' && C) {
+      const rm = activeRealMap();
+      if ((roadT -= dt) <= 0) {
+        roadT = 0.25;
+        const txt = formatRoadBadge(rm, cp.x, cp.z, driver.y || 0);
+        if (txt !== lastRoadTxt) { lastRoadTxt = txt; roadBadgeEl.textContent = txt; }
+      }
+      updateSkillHud(dt, s.kmh, driver.slide || 0, driver.impact || 0, rm, cp);
+      if (!rm) game.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z }, driver.vel.length(), mode);
+    } else if (!skillHudEl.hidden) {
+      skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
     }
+  } else if (!skillHudEl.hidden) {
+    skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
   }
   online.update(dt, mode, night);
   controls.update(dt);

@@ -132,18 +132,93 @@ class Layer {
 
 // ------------------------------------------------------------- textures
 function windowTextures() {
-  const S = 32, N = 4, W = S * N;
+  const S = 64, N = 8, W = S * N;
   const mk = () => { const c = document.createElement('canvas'); c.width = c.height = W; return c; };
   const a = mk(), e = mk(), ga = a.getContext('2d'), ge = e.getContext('2d');
-  ga.fillStyle = '#d9d9d6'; ga.fillRect(0, 0, W, W);
+  // 8x8 multi-style Bangkok architectural facade atlas:
+  // rows 0-1: office curtain wall & vertical fins
+  // rows 2-4: residential apartment / condo with balconies & AC compressor units
+  // rows 5-6: commercial shophouse upper floors & louvred shutters
+  // row 7: mechanical penthouse / solid precast bays
+  ga.fillStyle = '#cfc9be'; ga.fillRect(0, 0, W, W);
   ge.fillStyle = '#000'; ge.fillRect(0, 0, W, W);
-  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
-    const x = i * S + 6, y = j * S + 7;
-    ga.fillStyle = '#2d3d52'; ga.fillRect(x, y, S - 12, S - 16);
-    ga.fillStyle = 'rgba(255,255,255,0.35)'; ga.fillRect(x, y, S - 12, 2);
-    if (Math.random() < 0.55) {
-      ge.fillStyle = Math.random() < 0.7 ? '#ffd88a' : '#bfe2ff';
-      ge.fillRect(x, y, S - 12, S - 16);
+  const wallTones = ['#d2cbc0', '#b8c0c8', '#dfd7c8', '#9aa4ae', '#c8bba8', '#8f9aa4', '#d8d2c7', '#555d66'];
+  const glassTones = ['#23364b', '#1b2d40', '#2b455e', '#1e3247'];
+  const litTones = ['#ffd98e', '#fff0c8', '#ffe4a8', '#bfe4ff', '#d6ecff'];
+  for (let row = 0; row < N; row++) {
+    for (let col = 0; col < N; col++) {
+      const cx = col * S, cy = row * S;
+      const hash = ((row * 31 + col * 17) & 255) / 255;
+      ga.fillStyle = wallTones[row];
+      ga.fillRect(cx, cy, S, S);
+      // subtle concrete panel seam & shadow band
+      ga.fillStyle = 'rgba(0,0,0,0.14)';
+      ga.fillRect(cx, cy, S, 3);
+      ga.fillRect(cx, cy, 2, S);
+
+      if (row <= 1) {
+        // modern glass tower bay with mullions & spandrel
+        ga.fillStyle = '#394652';
+        ga.fillRect(cx + 3, cy + 5, S - 6, S - 9);
+        const w1 = (S - 14) * 0.5;
+        for (let k = 0; k < 2; k++) {
+          const wx = cx + 6 + k * (w1 + 3), wy = cy + 8, wh = S - 15;
+          ga.fillStyle = glassTones[(row + col + k) & 3];
+          ga.fillRect(wx, wy, w1, wh);
+          ga.fillStyle = 'rgba(200,230,255,0.22)';
+          ga.fillRect(wx, wy, w1, 5);
+          if (((row * 5 + col * 3 + k) % 10) < 6) {
+            ge.fillStyle = litTones[(row + col + k) % litTones.length];
+            ge.fillRect(wx + 1, wy + 2, w1 - 2, wh - 3);
+          }
+        }
+      } else if (row <= 4) {
+        // condo / apartment with recessed window, railing balcony & AC unit
+        const wx = cx + 9, wy = cy + 9, ww = S - 18, wh = S - 26;
+        ga.fillStyle = '#1e2c3a';
+        ga.fillRect(wx, wy, ww, wh);
+        ga.fillStyle = '#5c6670';
+        ga.fillRect(wx + ww * 0.48, wy, 2, wh);
+        // exterior AC box & louvre on alternate bays
+        if ((col + row) % 2 === 0) {
+          ga.fillStyle = '#e2e0da';
+          ga.fillRect(cx + S - 15, cy + 12, 11, 13);
+          ga.fillStyle = '#404850';
+          ga.fillRect(cx + S - 13, cy + 14, 7, 9);
+        }
+        // balcony slab & balustrade bars
+        ga.fillStyle = 'rgba(0,0,0,0.28)';
+        ga.fillRect(cx + 6, cy + S - 17, S - 12, 4);
+        ga.fillStyle = '#6f7780';
+        ga.fillRect(cx + 6, cy + S - 13, S - 12, 8);
+        ga.fillStyle = '#333b42';
+        for (let b = 8; b < S - 8; b += 7) ga.fillRect(cx + b, cy + S - 17, 2, 10);
+        if (hash < 0.56) {
+          ge.fillStyle = litTones[(row * 3 + col) % litTones.length];
+          ge.fillRect(wx + 2, wy + 2, ww - 4, wh - 4);
+        }
+      } else if (row <= 6) {
+        // shophouse residential floor with concrete overhang + 3 narrow windows
+        ga.fillStyle = 'rgba(0,0,0,0.22)';
+        ga.fillRect(cx + 2, cy + 4, S - 4, 4);
+        for (let k = 0; k < 3; k++) {
+          const wx = cx + 8 + k * 17, wy = cy + 13, ww = 12, wh = S - 24;
+          ga.fillStyle = '#243342';
+          ga.fillRect(wx, wy, ww, wh);
+          ga.fillStyle = '#dcd5c7';
+          ga.fillRect(wx - 1, wy + wh, ww + 2, 3);
+          if (((col + k + row) % 3) === 0) {
+            ge.fillStyle = litTones[(col + k) % 3];
+            ge.fillRect(wx + 1, wy + 2, ww - 2, wh - 3);
+          }
+        }
+      } else {
+        // mechanical / precast louvered service bay
+        ga.fillStyle = '#3a4149';
+        ga.fillRect(cx + 8, cy + 10, S - 16, S - 20);
+        ga.fillStyle = '#646e78';
+        for (let y = 14; y < S - 12; y += 6) ga.fillRect(cx + 10, cy + y, S - 20, 2);
+      }
     }
   }
   const t = (c, srgb) => {

@@ -258,12 +258,14 @@ export class WorldProps {
         const r = entry.road;
         const doLamp = LAMP_CLASSES.has(r.c);
         const doTree = treeCount < maxTrees && TREE_CLASSES.has(r.c);
-        if (!doLamp && !doTree) continue;
+        const doGantry = !r.elev && !r.b && (r.c === 'motorway' || r.c === 'trunk') && roadWidth(r) >= 12;
+        if (!doLamp && !doTree && !doGantry) continue;
 
         const p = r.p;
         const w = roadWidth(r);
         const ry = roadY(r);
         const cum = r.cum;
+        const totalD = cum ? cum[cum.length - 1] : 0;
 
         for (let i = entry.a; i < entry.b; i++) {
           const x0 = p[i * 2], z0 = p[i * 2 + 1];
@@ -306,6 +308,33 @@ export class WorldProps {
               // Ground light pool
               const poolY = elev > 0 ? elev + 0.08 + ry : 0.08 + ry;
               emitPool(poolGeo, hx, poolY, hz, 7.5);
+            }
+          }
+
+          if (doGantry) {
+            const gStep = 360;
+            const firstG = Math.ceil(Math.max(45, d0) / gStep) * gStep;
+            const pOff = w * 0.5 + 0.85;
+            for (let d = firstG; d < d1 && d < totalD - 25; d += gStep) {
+              const elev = r.elev ? elevAt(r, d) : 0;
+              if (elev > 0.2) continue;
+              const t = (d - d0) / segLen;
+              const gxPos = x0 + (x1 - x0) * t;
+              const gzPos = z0 + (z1 - z0) * t;
+              if (blds && insideAnyBuilding(gxPos, gzPos, blds, w * 0.5)) continue;
+              for (const sgn of [-1, 1]) {
+                emitBox(solidGeo, gxPos + nx * pOff * sgn, 3.9, gzPos + nz * pOff * sgn, 0.24, 3.9, 0.24, ux, uz, poleCol);
+              }
+              emitBox(solidGeo, gxPos, 7.65, gzPos, 0.22, 0.26, pOff + 0.2, ux, uz, poleCol);
+              emitBox(solidGeo, gxPos, 6.95, gzPos, 0.16, 0.14, pOff + 0.2, ux, uz, poleCol);
+              // Illuminated overhead green (#4cff88 slot 3) & cyan (#00e5ff slot 1) expressway signboards
+              const signOffsets = w >= 16 ? [-w * 0.22, w * 0.22] : [0];
+              signOffsets.forEach((off, idx) => {
+                const cIdx = idx === 0 ? 3 : 1;
+                const u0 = cIdx * 0.25 + 0.01, u1 = (cIdx + 1) * 0.25 - 0.01;
+                const sx = gxPos + nx * off, sz = gzPos + nz * off;
+                emitBox(neonGeo, sx, 6.85, sz, 0.16, 0.9, Math.min(w * 0.19, 3.1), ux, uz, null, [u0, 0, u1, 0, u1, 1, u0, 1], false);
+              });
             }
           }
 
