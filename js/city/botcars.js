@@ -51,7 +51,15 @@ const aeroGeos = {
   lipSpoiler: new THREE.BoxGeometry(0.14, 0.055, 1.38),
   frontLip: new THREE.BoxGeometry(0.16, 0.055, 1.68),
   underglow: new THREE.PlaneGeometry(3.1, 1.35).rotateX(-Math.PI / 2),
+  headLight: new THREE.BoxGeometry(0.06, 0.11, 0.28),
+  tailLight: new THREE.BoxGeometry(0.06, 0.11, 0.30),
 };
+const botHeadMat = new THREE.MeshStandardMaterial({ color: 0xfff6d0, emissive: 0xffe8a0, emissiveIntensity: 0.2 });
+const botTailMat = new THREE.MeshStandardMaterial({ color: 0x881010, emissive: 0xff2020, emissiveIntensity: 0.3 });
+export function setBotLights(night = 0) {
+  botHeadMat.emissiveIntensity = 0.15 + night * 2.4;
+  botTailMat.emissiveIntensity = 0.25 + night * 1.6;
+}
 
 let fullLoading = null;
 const fullReadySet = new Set();
@@ -224,15 +232,18 @@ async function loadBotFile(g) {
   return { gen: g, parts, L: box.max.x - box.min.x, W: box.max.z - box.min.z };
 }
 
-// load bot cars for up to `limit` models (the player's current car first), one at a time
+// load bot cars from full GLB templates via makeProto (clean geometry, fast merged meshes, ~6 draw calls/car)
 export function loadBotModels(limit = BOT_GENS.length, first = null) {
   if (loading && loading.limit >= limit) return loading;
   const order = [...BOT_GENS].sort((a, b) => (b.id === first) - (a.id === first));
   loading = (async () => {
     for (const g of order.slice(0, limit)) {
       if (protos.has(g.id)) continue;
-      try { protos.set(g.id, await loadBotFile(g)); } catch (e) { console.warn('bot model failed', g.id, e); }
-      await new Promise((r) => setTimeout(r, 20));
+      try {
+        const tpl = getReadyTemplate(g.glb) || await loadTemplate(g.glb, g.glbConfig || {});
+        if (tpl) protos.set(g.id, makeProto(g, tpl));
+      } catch (e) { console.warn('bot model failed', g.id, e); }
+      await new Promise((r) => setTimeout(r, 40));
     }
     return botReady();
   })();
@@ -279,6 +290,12 @@ export function makeBotBody(proto, color, shadows = true, custom = null) {
   if (c.underglow) {
     const ug = new THREE.Mesh(aeroGeos.underglow, getGlowMat(c.underglow));
     ug.position.set(0, 0.05, 0); ug.updateMatrix(); ug.matrixAutoUpdate = false; g.add(ug);
+  }
+  for (const sz of [-0.56, 0.56]) {
+    const hlm = new THREE.Mesh(aeroGeos.headLight, botHeadMat);
+    hlm.position.set(hl - 0.02, 0.56, sz); hlm.updateMatrix(); hlm.matrixAutoUpdate = false; g.add(hlm);
+    const tlm = new THREE.Mesh(aeroGeos.tailLight, botTailMat);
+    tlm.position.set(-hl + 0.02, 0.64, sz); tlm.updateMatrix(); tlm.matrixAutoUpdate = false; g.add(tlm);
   }
   g.userData = { L: proto.L, W: proto.W, gen: proto.gen.id, name: proto.gen.name };
   return g;

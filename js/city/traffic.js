@@ -4,8 +4,7 @@ import * as THREE from 'three';
 import { LAYOUT } from './city.js';
 import { makeVehicle, VEHICLE_TYPES, lightMats } from './vehicles.js';
 import { rng } from './textures.js';
-import { Car } from '../car.js';
-import { readyFullGens, randomCarBuild } from './botcars.js';
+import { botReady, makeBotBody, randomBotCustom, setBotLights } from './botcars.js';
 
 const L = LAYOUT;
 const nodePos = (i, j) => [L.c[i], L.c[j]];
@@ -52,11 +51,11 @@ export class Traffic {
     car.mesh.userData = { ...simple.userData };
     car.simple = simple;
     car.color = '#' + simple.children[0].material.color.getHexString();
-    car.eligible = true;
+    car.eligible = type !== 'truck';
     car.pick = this.r();
-    car.fullBuild = null;
-    car.fullCount = 0;
-    car.carObj = null;
+    car.custom = randomBotCustom(this.r);
+    car.real = null;
+    car.realCount = 0;
     car.vmax = (type === 'truck' ? 0.85 : type === 'kei' ? 0.92 : 1) * (0.9 + this.r() * 0.2);
     this.group.add(car.mesh);
     this.cars.push(car);
@@ -122,58 +121,43 @@ export class Traffic {
     return { x: p[0] + dx * t + left[0] * lane, z: p[1] + dz * t + left[1] * lane, fx, fz };
   }
 
-  // level of detail: the nearest cars swap their simple body for a full tuned Car model
-  updateLOD(player, night = 0) {
-    const gens = readyFullGens();
-    if (!gens.length || !this.opts.real) return;
-    if (!this._carPool) {
-      this._carPool = [];
-      const lim = Math.max(1, this.opts.nearN || 9);
-      for (let k = 0; k < lim; k++) {
-        const co = new Car();
-        co.root.visible = false;
-        this.group.add(co.root);
-        this._carPool.push({ car: co, owner: null });
-      }
-    }
+  // level of detail: the nearest cars swap their simple body for a merged real-model Car with randomized tuning
+  updateLOD(player) {
+    const protos = this.opts.real ? botReady() : [];
+    if (!protos.length) return;
     const near = [];
     for (const c of this.cars) {
       if (!c.eligible || c.x === undefined) continue;
       const d = player ? (c.x - player.x) ** 2 + (c.z - player.z) ** 2 + ((c.y - player.y) * 3) ** 2 : 0;
-      if (d < 220 * 220) near.push([d, c]);
+      near.push([d, c]);
     }
     near.sort((a, b) => a[0] - b[0]);
-    const want = new Set(near.slice(0, this._carPool.length).map(([, c]) => c));
-    for (const slot of this._carPool) {
-      if (slot.owner && !want.has(slot.owner)) {
-        slot.owner.carObj = null;
-        slot.owner.simple.visible = true;
-        slot.owner = null;
-        slot.car.root.visible = false;
+    const lim = Math.min(8, this.opts.nearN || 8);
+    const show = new Set(near.slice(0, lim).filter(([d]) => d < 180 * 180).map(([, c]) => c));
+    let built = 0;
+    for (const [, c] of near) {
+      const on = show.has(c);
+      if (on && c.real && c.realCount < protos.length && built === 0 && Math.random() < 0.08) {
+        c.mesh.remove(c.real);
+        c.real = null;
       }
-    }
-    for (const [, c] of near.slice(0, this._carPool.length)) {
-      if (c.carObj) continue;
-      const slot = this._carPool.find((s) => !s.owner);
-      if (!slot) break;
-      if (!c.fullBuild || c.fullCount < gens.length) {
-        c.fullBuild = randomCarBuild(Math.random, gens);
-        c.fullCount = gens.length;
+      if (on && !c.real && built < 2) {
+        const pr = protos[Math.floor(c.pick * protos.length)];
+        c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
+        c.realCount = protos.length;
+        c.mesh.add(c.real);
+        c.mesh.userData.L = pr.L; c.mesh.userData.W = pr.W;
+        built++;
       }
-      slot.owner = c;
-      c.carObj = slot;
-      slot.car.setBuild(c.fullBuild);
-      slot.car.setAutoLights(night > 0.55);
-      slot.car.root.visible = true;
-      c.simple.visible = false;
-      c.mesh.userData.L = slot.car.gen?.length || 4.3;
-      c.mesh.userData.W = slot.car.gen?.width || 1.75;
+      if (c.real) c.real.visible = on;
+      c.simple.visible = !on || !c.real;
     }
   }
 
   update(dt, player, night) {
     this.lodT -= dt;
-    if (this.lodT <= 0) { this.lodT = 0.35; this.updateLOD(player, night); }
+    if (this.lodT <= 0) { this.lodT = 0.35; this.updateLOD(player); }
+    setBotLights(night);
     const st = this.city.signalState(this.city.time);
     lightMats.head.emissiveIntensity = 0.2 + night * 3;
     lightMats.tail.emissiveIntensity = 0.3 + night * 1.6;
@@ -243,13 +227,6 @@ export class Traffic {
       } else car.s += ds * car.dir;
       car.mesh.position.set(x, y, z);
       car.mesh.rotation.y = Math.atan2(-fz, fx);
-      if (car.carObj) {
-        const co = car.carObj.car;
-        co.root.position.set(x, y, z);
-        co.root.rotation.y = Math.atan2(-fz, fx);
-        co.setAutoLights(night > 0.55);
-        co.animate(0, Math.max(0, car.v) * dt / 0.31, 0, 0);
-      }
       car.x = x; car.z = z; car.y = y; car.fx = fx; car.fz = fz;
     }
   }

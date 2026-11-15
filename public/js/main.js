@@ -357,7 +357,6 @@ function loadBots() {
   if (!C) return;
   // phones: fewer distinct models (less to download and keep in memory)
   C.BOTS.loadBotModels(99, build.gen).catch(() => {});
-  C.BOTS.preloadFullCarModels(build.gen).catch(() => {});
 }
 
 function spawnRaw(sp) {
@@ -460,7 +459,7 @@ async function switchCityMap(w) {
       const res = await tm.load('data/', REAL_CFG[w]);
       if (!res.local && !res.country) { ld.classList.add('hide'); toast('ยังไม่มีข้อมูลแผนที่นี้'); return; }
       realMaps[w] = tm;
-      if (gfx.get('bots') === 'real') { loadBots(); C.BOTS.preloadFullCarModels(build.gen); }
+      if (gfx.get('bots') === 'real') loadBots();
       ld.classList.add('hide');
     }
   }

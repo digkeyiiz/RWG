@@ -3,8 +3,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { roadY, elevAt, laneCount } from './roadmesh.js';
-import { Car } from '../car.js';
-import { readyFullGens, randomCarBuild } from '../city/botcars.js';
+import { botReady, makeBotBody, randomBotCustom, setBotLights } from '../city/botcars.js';
 
 const DRIVABLE = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary']);
 const LANE_W = 3.3;
@@ -117,20 +116,13 @@ export class RealTraffic {
         tx: 1,
         tz: 0,
         pick: Math.random(),
-        fullBuild: null,
-        fullCount: 0,
-        carObj: null,
+        custom: randomBotCustom(),
+        real: null,
+        realCount: 0,
       });
     }
     this._lodT = 0;
-    this._nearLimit = Math.min(10, Math.max(4, Math.round(this.count * 0.25)));
-    this._carPool = [];
-    for (let k = 0; k < this._nearLimit; k++) {
-      const c = new Car();
-      c.root.visible = false;
-      this.group.add(c.root);
-      this._carPool.push({ car: c, owner: null });
-    }
+    this._nearLimit = Math.min(8, Math.max(4, Math.round(this.count * 0.2)));
 
     this._dummy = new THREE.Object3D();
     this._zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -397,7 +389,7 @@ export class RealTraffic {
       }
 
       if (!car.active) {
-        if (car.carObj) { car.carObj.car.root.visible = false; car.carObj.owner = null; car.carObj = null; }
+        if (car.real) car.real.visible = false;
         for (const m of this._meshes) m.setMatrixAt(i, this._zeroMat);
         continue;
       }
@@ -445,13 +437,9 @@ export class RealTraffic {
 
       this._placeCar(car);
 
-      if (car.carObj) {
-        const co = car.carObj.car;
-        co.root.visible = true;
-        co.root.position.set(car.x, car.y, car.z);
-        co.root.rotation.y = Math.atan2(-car.tz, car.tx);
-        co.setAutoLights(night > 0.55);
-        co.animate(0, car.speed * clampedDt / 0.31, 0, 0);
+      if (car.real && car.real.visible) {
+        car.real.position.set(car.x, car.y, car.z);
+        car.real.rotation.y = Math.atan2(-car.tz, car.tx);
         for (const m of this._meshes) m.setMatrixAt(i, this._zeroMat);
       } else {
         dummy.position.set(car.x, car.y, car.z);
@@ -462,6 +450,7 @@ export class RealTraffic {
       }
     }
 
+    setBotLights(night);
     this._lodT -= clampedDt;
     if (this._lodT <= 0) {
       this._lodT = 0.4;
@@ -472,38 +461,32 @@ export class RealTraffic {
   }
 
   _updateLOD(px, pz) {
-    const gens = readyFullGens();
-    if (!gens.length) return;
+    const protos = botReady();
+    if (!protos.length) return;
     const near = [];
     for (const c of this.cars) {
-      if (!c.active) continue;
+      if (!c.active) { if (c.real) c.real.visible = false; continue; }
       const d2 = (c.x - px) ** 2 + (c.z - pz) ** 2;
       if (d2 < 240 * 240) near.push([d2, c]);
+      else if (c.real) c.real.visible = false;
     }
     near.sort((a, b) => a[0] - b[0]);
-    const want = new Set(near.slice(0, this._nearLimit).map(([, c]) => c));
-
-    // Release pool slots for cars no longer in the nearest set
-    for (const slot of this._carPool) {
-      if (slot.owner && !want.has(slot.owner)) {
-        slot.owner.carObj = null;
-        slot.owner = null;
-        slot.car.root.visible = false;
+    const show = new Set(near.slice(0, this._nearLimit).map(([, c]) => c));
+    let built = 0;
+    for (const [, c] of near) {
+      const on = show.has(c);
+      if (on && c.real && c.realCount < protos.length && built === 0 && Math.random() < 0.08) {
+        this.group.remove(c.real);
+        c.real = null;
       }
-    }
-    // Assign free pool slots to nearest cars
-    for (const [, c] of near.slice(0, this._nearLimit)) {
-      if (c.carObj) continue;
-      const slot = this._carPool.find((s) => !s.owner);
-      if (!slot) break;
-      if (!c.fullBuild || c.fullCount < gens.length) {
-        c.fullBuild = randomCarBuild(Math.random, gens);
-        c.fullCount = gens.length;
+      if (on && !c.real && built < 2) {
+        const pr = protos[Math.floor(c.pick * protos.length)];
+        c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
+        c.realCount = protos.length;
+        this.group.add(c.real);
+        built++;
       }
-      slot.owner = c;
-      c.carObj = slot;
-      slot.car.setBuild(c.fullBuild);
-      slot.car.root.visible = true;
+      if (c.real) c.real.visible = on;
     }
   }
 
