@@ -1,7 +1,6 @@
 // Renderer, lighting, garage showroom and test track.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 
 export function createWorld(canvas, opts = {}) {
@@ -15,7 +14,29 @@ export function createWorld(canvas, opts = {}) {
 
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const envTex = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+  // Photo-studio lighting: big overhead softbox + long strip lights down both flanks, so metallic paint,
+  // carbon and chrome get the long clean highlights that make a tuned car look expensive.
+  const studioEnv = () => {
+    const s = new THREE.Scene();
+    const room = new THREE.Mesh(new THREE.BoxGeometry(30, 14, 30), new THREE.MeshBasicMaterial({ color: '#1d2028', side: THREE.BackSide }));
+    room.position.y = 6;
+    s.add(room);
+    const box = (w, h, d, x, y, z, k, col = '#ffffff', rx = 0, ry = 0) => {
+      const m = new THREE.MeshBasicMaterial({ color: new THREE.Color(col).multiplyScalar(k) });
+      const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+      o.position.set(x, y, z); o.rotation.set(rx, ry, 0); s.add(o);
+    };
+    box(14, 0.15, 6, 0, 7.6, 0, 1.15);                // overhead softbox
+    box(0.7, 5.2, 7, 11, 3.2, 0, 2.3, '#f4f8ff');      // flank strips
+    box(0.7, 5.2, 7, -11, 3.2, 0, 2.3, '#fff4ea');
+    box(7, 5.2, 0.7, 0, 3.2, 11, 1.7, '#ffffff');      // front / rear strips
+    box(7, 5.2, 0.7, 0, 3.2, -11, 1.7, '#ffffff');
+    box(2.2, 0.15, 12, 7, 5.6, 0, 0.9, '#dfe9ff');     // upper side kickers (reflect on shoulders and roof)
+    box(2.2, 0.15, 12, -7, 5.6, 0, 0.9, '#ffe9d6');
+    box(14, 0.1, 14, 0, -0.4, 0, 0.5, '#8a8f99');      // dim floor bounce
+    return s;
+  };
+  const envTex = pmrem.fromScene(studioEnv(), 0.03).texture;
   scene.environment = envTex;
 
   const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 600);
@@ -43,10 +64,11 @@ export function createWorld(canvas, opts = {}) {
 
   // ---------- garage ----------
   const garage = new THREE.Group();
-  const reflector = new Reflector(new THREE.CircleGeometry(29.5, 64), {
+  // Smaller disc + bigger texture → ~6x sharper reflection of the car (the old 512px / 59 m floor was a smear of pixels)
+  const reflector = new Reflector(new THREE.CircleGeometry(12, 64), {
     clipBias: 0.003,
-    textureWidth: 512,
-    textureHeight: 512,
+    textureWidth: 1024,
+    textureHeight: 1024,
     color: 0x181a20,
   });
   reflector.rotation.x = -Math.PI / 2;
@@ -131,9 +153,13 @@ export function createWorld(canvas, opts = {}) {
     camera.aspect = w / h;
     // portrait phones: wider lens and push the car above the bottom-sheet panel
     camera.fov = camera.aspect < 0.8 ? 64 : camera.aspect < 1.2 ? 50 : 38;
-    if (camera.aspect < 1.2) camera.setViewOffset(w, h, 0, h * 0.17, w, h); else camera.clearViewOffset();
+    if (camera.aspect < 1.2) camera.setViewOffset(w, h, 0, h * 0.17, w, h);
+    else if (inset > 0) camera.setViewOffset(w, h, -inset / 2, 0, w, h); // keep the car centred in the free area beside the tuning panel
+    else camera.clearViewOffset();
     camera.updateProjectionMatrix();
   };
+  let inset = 0;
+  const setViewInset = (px) => { inset = Math.max(0, px | 0); resize(); };
   window.addEventListener('resize', resize);
   resize();
 
@@ -159,7 +185,7 @@ export function createWorld(canvas, opts = {}) {
   }
   setMode('garage');
 
-  return { renderer, scene, camera, controls, sun, hemi, garage, track, cones, reflector, setMode, resize };
+  return { renderer, scene, camera, controls, sun, hemi, garage, track, cones, reflector, setMode, resize, setViewInset, envTex };
 }
 
 function makeAsphalt() {

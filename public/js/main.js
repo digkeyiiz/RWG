@@ -39,11 +39,11 @@ car.onNotice = (msg) => { toast(msg); window.__panelRef?.updateFit(); };
 scene.add(car.root);
 
 // Fonts must be ready before drawing Thai text on the license plate canvas.
-await document.fonts.load('600 40px Kanit', 'กข').catch(() => {});
+await document.fonts.load('600 40px Kanit', 'กข').catch(() => { });
 const startGen = GENERATIONS.find((g) => g.id === build.gen);
 if (startGen?.glb) {
   document.getElementById('loading').textContent = 'กำลังโหลดโมเดล 3D…';
-  await loadTemplate(startGen.glb, startGen.glbConfig || {}).catch(() => {});
+  await loadTemplate(startGen.glb, startGen.glbConfig || {}).catch(() => { });
 }
 car.setBuild(build);
 document.getElementById('loading').classList.add('hide');
@@ -82,10 +82,10 @@ panel.onSwitchCar = async (genId) => {
   garage.put(build);
   const nb = garage.get(genId);
   const g = GENERATIONS.find((x) => x.id === nb.gen);
-  if (g?.glb) { toast('กำลังโหลด ' + g.name + '…'); await loadTemplate(g.glb, g.glbConfig || {}).catch(() => {}); }
+  if (g?.glb) { toast('กำลังโหลด ' + g.name + '…'); await loadTemplate(g.glb, g.glbConfig || {}).catch(() => { }); }
   // parts this car had before the economy but that aren't owned go back to stock
   if (online?.me) stripUnowned(nb);
-  build = nb; lastGoodEngine = JSON.parse(JSON.stringify(build.engine)); car.setBuild(build); updateCredit(); persist(); online?.sendBuild(); panel.refresh();
+  build = nb; lastGoodEngine = JSON.parse(JSON.stringify(build.engine)); car.setBuild(build); updateCredit(); persist(); online?.sendBuild(); panel.resetHistory(); panel.refresh();
   toast(garage.has(genId) ? `🚗 ${g.name} — ชุดแต่งเดิมของคันนี้` : `🚗 ${g.name}`);
 };
 panel.garage = garage;
@@ -113,7 +113,7 @@ let camAnim = null;
 function flyTo(pos, target) {
   camAnim = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos, t1: target, t: 0 };
 }
-const far = () => (camera.aspect < 0.8 ? 1.45 : 1);
+const far = () => (camera.aspect < 0.8 ? 1.45 : camera.aspect >= 1.2 ? 1.14 : 1);
 const presets = {
   front34: () => [new THREE.Vector3(4.6, 1.35, 3.4).multiplyScalar(far()), new THREE.Vector3(0, 0.6, 0)],
   side: () => [new THREE.Vector3(0.2, 1.0, 6.4).multiplyScalar(far()), new THREE.Vector3(0, 0.65, 0)],
@@ -122,6 +122,17 @@ const presets = {
   wheel: () => [new THREE.Vector3(car.P.fAx + 1.0, 0.5, 2.1), new THREE.Vector3(car.P.fAx, 0.32, 0.75)],
 };
 { const [p0, t0] = presets.front34(); camera.position.copy(p0); controls.target.copy(t0); }
+// choosing a part in the tuning panel swings the camera round to it — but only if it is not already in view
+panel.renderer = renderer; panel.env = world.envTex;
+panel.onFocus = (part) => {
+  if (mode !== 'garage') return;
+  const v = camera.position.clone().sub(controls.target); v.y = 0; v.normalize();
+  const view = { front: v.x > 0.35, rear: v.x < -0.35, side: Math.abs(v.z) > 0.7, wheel: v.z > 0.45 && v.x > -0.25 && camera.position.distanceTo(controls.target) < 4.2 };
+  if (view[part] !== false && view[part]) return;
+  controls.autoRotate = false; btnRotate.classList.remove('on');
+  const [p, t] = presets[{ front: 'front34', rear: 'rear34', side: 'side', wheel: 'wheel' }[part] || 'front34']();
+  flyTo(p, t);
+};
 document.querySelectorAll('#camSeg button').forEach((b) => b.addEventListener('click', () => {
   if (mode !== 'garage') return;
   controls.autoRotate = false; btnRotate.classList.remove('on');
@@ -267,7 +278,7 @@ async function ensureCity() {
   const ld = document.getElementById('loading');
   ld.textContent = 'กำลังสร้างเมือง…'; ld.classList.remove('hide');
   await new Promise((r) => setTimeout(r, 30));
-  await document.fonts.load('700 40px Kanit', 'ทางด่วนดินแดงพระราม9หยุด').catch(() => {});
+  await document.fonts.load('700 40px Kanit', 'ทางด่วนดินแดงพระราม9หยุด').catch(() => { });
   let Touge, BOTS, Weather, makeGradePass;
   const [{ City }, { Traffic }, { Sky }, { Minimap }, , , , , { EffectComposer }, { RenderPass }, { UnrealBloomPass }, { OutputPass }] = await Promise.all([
     import('./city/city.js'), import('./city/traffic.js'), import('./city/sky.js'), import('./city/minimap.js'),
@@ -344,7 +355,7 @@ function surfaceMu(x, z) {
 function loadBots() {
   if (!C) return;
   // phones: fewer distinct models (less to download and keep in memory)
-  C.BOTS.loadBotModels(99, build.gen).catch(() => {});
+  C.BOTS.loadBotModels(99, build.gen).catch(() => { });
 }
 
 function spawnRaw(sp) {
@@ -406,7 +417,12 @@ async function setMode(m, spawn = null) {
     sun.position.set(4, 8, 3); sun.target.position.set(0, 0, 0);
     const [p, t] = presets.front34(); camera.position.copy(p); controls.target.copy(t);
   }
+  syncInset();
 }
+// in the garage the tuning panel covers the left of the screen: shift the view so the car sits in the free area
+function syncInset() { world.setViewInset(mode === 'garage' && innerWidth > 820 ? 374 : 0); }
+window.addEventListener('resize', syncInset);
+syncInset();
 document.getElementById('timeSlider').oninput = (e) => { hour = +e.target.value; };
 document.getElementById('btnTimeAuto').onclick = (e) => { timeAuto = !timeAuto; e.currentTarget.classList.toggle('on', timeAuto); };
 document.getElementById('btnBloom').onclick = () => gfx.set('bloom', !gfx.get('bloom'));
@@ -714,111 +730,111 @@ function frame(now) {
     if (s.nos !== null) { nosI.style.width = `${Math.round(s.nos * 100)}%`; nosBar.classList.toggle('on', !!s.nosOn); }
     const fov = baseFov() + (gfx.get('fovKick') ? Math.min(9, s.kmh * 0.045) + (s.nosOn ? 5 : 0) : 0);
     if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
-    if (mode === 'city' && C) {
-      const rm = activeRealMap();
-      if ((roadT -= dt) <= 0) {
-        roadT = 0.25;
-        const txt = formatRoadBadge(rm, cp.x, cp.z, driver.y || 0);
-        if (txt !== lastRoadTxt) { lastRoadTxt = txt; roadBadgeEl.textContent = txt; }
+      if (mode === 'city' && C) {
+        const rm = activeRealMap();
+        if ((roadT -= dt) <= 0) {
+          roadT = 0.25;
+          const txt = formatRoadBadge(rm, cp.x, cp.z, driver.y || 0);
+          if (txt !== lastRoadTxt) { lastRoadTxt = txt; roadBadgeEl.textContent = txt; }
+        }
+        updateSkillHud(dt, s.kmh, driver.slide || 0, driver.impact || 0, rm, cp);
+        if (!rm) game.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z }, driver.vel.length(), mode);
+      } else if (!skillHudEl.hidden) {
+        skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
       }
-      updateSkillHud(dt, s.kmh, driver.slide || 0, driver.impact || 0, rm, cp);
-      if (!rm) game.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z }, driver.vel.length(), mode);
     } else if (!skillHudEl.hidden) {
       skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
     }
-  } else if (!skillHudEl.hidden) {
-    skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
+    online.update(dt, mode, night);
+    controls.update(dt);
+    if (mode === 'city' && C && gfx.get('bloom')) { C.bloom.strength = 0.12 + night * 0.38; C.bloom.threshold = 0.92; C.bloom.radius = 0.35; C.grade.setState({ time: performance.now() / 1000, night, wet: C.weather.wet, speed: driver.vel.length() / 80 }); C.composer.render(dt); }
+    else renderer.render(scene, camera);
   }
-  online.update(dt, mode, night);
-  controls.update(dt);
-  if (mode === 'city' && C && gfx.get('bloom')) { C.bloom.strength = 0.12 + night * 0.38; C.bloom.threshold = 0.92; C.bloom.radius = 0.35; C.grade.setState({ time: performance.now() / 1000, night, wet: C.weather.wet, speed: driver.vel.length() / 80 }); C.composer.render(dt); }
-  else renderer.render(scene, camera);
-}
-requestAnimationFrame(frame);
+  requestAnimationFrame(frame);
 
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
-}
-// ---------- social: friends, party, warp, car showcase ----------
-let inspecting = null;
-const social = new Social({
-  online, toast, game,
-  hooks: {
-    warpTo: async (pose, id) => {
-      if (race.active) race.abort();
-      if (inGarage) document.getElementById('btnExitGarage').click();
-      if (mode !== 'city') await setMode('city');
-      if (!pose) { toast('วาร์ปแล้ว — เพื่อนยังไม่ได้ขับในเมือง'); return; }
-      // land a few metres beside the friend's car
-      setTimeout(() => {
-        const p = id && online.peers.get(id)?.pose;
-        const h = p ? p.h : 0, tgt = p || pose;
-        spawnRaw({ x: tgt.x - Math.cos(h) * 7 + Math.sin(h) * 3, y: tgt.y, z: tgt.z + Math.sin(h) * 7 + Math.cos(h) * 3, heading: h });
-        toast('🚀 วาร์ปถึงเพื่อนแล้ว');
-      }, 600);
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => { });
+  }
+  // ---------- social: friends, party, warp, car showcase ----------
+  let inspecting = null;
+  const social = new Social({
+    online, toast, game,
+    hooks: {
+      warpTo: async (pose, id) => {
+        if (race.active) race.abort();
+        if (inGarage) document.getElementById('btnExitGarage').click();
+        if (mode !== 'city') await setMode('city');
+        if (!pose) { toast('วาร์ปแล้ว — เพื่อนยังไม่ได้ขับในเมือง'); return; }
+        // land a few metres beside the friend's car
+        setTimeout(() => {
+          const p = id && online.peers.get(id)?.pose;
+          const h = p ? p.h : 0, tgt = p || pose;
+          spawnRaw({ x: tgt.x - Math.cos(h) * 7 + Math.sin(h) * 3, y: tgt.y, z: tgt.z + Math.sin(h) * 7 + Math.cos(h) * 3, heading: h });
+          toast('🚀 วาร์ปถึงเพื่อนแล้ว');
+        }, 600);
+      },
+      partyRace: async () => { await ensureCity(); race.openSetup(null, null, true); },
+      challenge: (t) => race.openSetup(null, t),
+      startInspect: (peer) => { inspecting = peer; online.inspectingId = peer?.id || null; driver.frozen = true; document.body.classList.add('inspecting'); controls.autoRotate = true; controls.autoRotateSpeed = 1.2; },
+      endInspect: () => { inspecting = null; online.inspectingId = null; driver.frozen = false; document.body.classList.remove('inspecting'); controls.autoRotate = false; },
     },
-    partyRace: async () => { await ensureCity(); race.openSetup(null, null, true); },
-    challenge: (t) => race.openSetup(null, t),
-    startInspect: (peer) => { inspecting = peer; online.inspectingId = peer?.id || null; driver.frozen = true; document.body.classList.add('inspecting'); controls.autoRotate = true; controls.autoRotateSpeed = 1.2; },
-    endInspect: () => { inspecting = null; online.inspectingId = null; driver.frozen = false; document.body.classList.remove('inspecting'); controls.autoRotate = false; },
-  },
-});
-const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p) });
+  });
+  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p) });
 
-// ---------- title → straight into the shared online world (no rooms, no offline mode) ----------
-const ttName = document.getElementById('ttName'), ttGo = document.getElementById('ttGo'), ttStatus = document.getElementById('ttStatus');
-if (!ttName.value) ttName.value = online.name || ''; // don't wipe what was typed while the game loaded
-ttName.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') ttGo.click(); });
-let entered = false;
-ttGo.onclick = () => enterCity(false);
-async function enterCity(fromLogin) {
-  const n = ttName.value.trim();
-  // after logging in, the account's saved racer name wins (the server fills it in on hello)
-  if (fromLogin) online.setName('');
-  else {
-    if (!n) { ttName.focus(); ttStatus.textContent = 'ตั้งชื่อนักซิ่งก่อนนะ'; return; }
-    if (n !== online.name) online.setName(n);
+  // ---------- title → straight into the shared online world (no rooms, no offline mode) ----------
+  const ttName = document.getElementById('ttName'), ttGo = document.getElementById('ttGo'), ttStatus = document.getElementById('ttStatus');
+  if (!ttName.value) ttName.value = online.name || ''; // don't wipe what was typed while the game loaded
+  ttName.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') ttGo.click(); });
+  let entered = false;
+  ttGo.onclick = () => enterCity(false);
+  async function enterCity(fromLogin) {
+    const n = ttName.value.trim();
+    // after logging in, the account's saved racer name wins (the server fills it in on hello)
+    if (fromLogin) online.setName('');
+    else {
+      if (!n) { ttName.focus(); ttStatus.textContent = 'ตั้งชื่อนักซิ่งก่อนนะ'; return; }
+      if (n !== online.name) online.setName(n);
+    }
+    ttGo.disabled = true; ttStatus.textContent = 'กำลังเชื่อมต่อเซิร์ฟเวอร์…';
+    const r = await online.start();
+    if (!r.ok) { ttGo.disabled = false; ttGo.textContent = 'ลองเชื่อมต่ออีกครั้ง ↻'; ttStatus.textContent = '⚠️ ' + (r.err || 'เชื่อมต่อไม่ได้'); return; }
+    // what the server says we don't own goes back to stock (a car we don't own → the starter car)
+    if (panel.missing(build).some((k) => k.startsWith('car:'))) { garage.put(build); build = garage.get('gen2'); }
+    stripUnowned(build);
+    car.setBuild(build); updateCredit(); persist(); online.sendBuild();
+    lastGoodEngine = JSON.parse(JSON.stringify(build.engine || null));
+    ttStatus.textContent = 'กำลังสร้างเมือง…';
+    await setMode('city', garageSpawn(GARAGES[0]));
+    document.body.classList.remove('title');
+    entered = true;
+    game.updateWallet();
+    game.feed(`ยินดีต้อนรับ <b>${online.name}</b> · เงิน ฿${online.me.money.toLocaleString()} · ออนไลน์ ${r.online} คน`);
+    if (r.me.races === 0) game.feed('💡 เก็บเหรียญ ฿ ตามถนน · วงฟ้า = อู่ (กด E) · วงม่วง = อู่ลับ · วงแดง = จุดแข่ง · M = แผนที่', 'tip');
   }
-  ttGo.disabled = true; ttStatus.textContent = 'กำลังเชื่อมต่อเซิร์ฟเวอร์…';
-  const r = await online.start();
-  if (!r.ok) { ttGo.disabled = false; ttGo.textContent = 'ลองเชื่อมต่ออีกครั้ง ↻'; ttStatus.textContent = '⚠️ ' + (r.err || 'เชื่อมต่อไม่ได้'); return; }
-  // what the server says we don't own goes back to stock (a car we don't own → the starter car)
-  if (panel.missing(build).some((k) => k.startsWith('car:'))) { garage.put(build); build = garage.get('gen2'); }
-  stripUnowned(build);
-  car.setBuild(build); updateCredit(); persist(); online.sendBuild();
-  lastGoodEngine = JSON.parse(JSON.stringify(build.engine || null));
-  ttStatus.textContent = 'กำลังสร้างเมือง…';
-  await setMode('city', garageSpawn(GARAGES[0]));
-  document.body.classList.remove('title');
-  entered = true;
-  game.updateWallet();
-  game.feed(`ยินดีต้อนรับ <b>${online.name}</b> · เงิน ฿${online.me.money.toLocaleString()} · ออนไลน์ ${r.online} คน`);
-  if (r.me.races === 0) game.feed('💡 เก็บเหรียญ ฿ ตามถนน · วงฟ้า = อู่ (กด E) · วงม่วง = อู่ลับ · วงแดง = จุดแข่ง · M = แผนที่', 'tip');
-}
-online.on((ev) => {
-  if (ev?.hello && entered) game.feed('🔄 เชื่อมต่อกลับเข้าเมืองแล้ว');
-  if (ev?.kicked) { document.body.classList.add('title'); ttStatus.textContent = '⚠️ บัญชีนี้เข้าเล่นจากที่อื่นแล้ว — รีโหลดหน้าเพื่อเล่นที่นี่'; ttGo.disabled = true; }
-  if (ev?.world && entered) game.feed(`🚀 ย้ายไปเมือง ${ev.world.world}`);
-});
-document.getElementById('ttAcc').onclick = () => { const b = document.getElementById('ttLoginBox'); b.hidden = !b.hidden; if (!b.hidden) document.getElementById('ttUser').focus(); };
-for (const id of ['ttUser', 'ttPass']) document.getElementById(id).addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') document.getElementById('ttLogin').click(); });
-document.getElementById('ttLogin').onclick = async () => {
-  ttStatus.textContent = 'กำลังเข้าสู่ระบบ…';
-  const r = await online.login(document.getElementById('ttUser').value.trim(), document.getElementById('ttPass').value);
-  if (!r.ok) { ttStatus.textContent = '⚠️ ' + r.err; return; }
-  enterCity(true);
-};
-// switched account from the friends menu → go straight in as that account
-try { if (sessionStorage.getItem('vg:relogin')) { sessionStorage.removeItem('vg:relogin'); enterCity(true); } } catch { /* ignore */ }
+  online.on((ev) => {
+    if (ev?.hello && entered) game.feed('🔄 เชื่อมต่อกลับเข้าเมืองแล้ว');
+    if (ev?.kicked) { document.body.classList.add('title'); ttStatus.textContent = '⚠️ บัญชีนี้เข้าเล่นจากที่อื่นแล้ว — รีโหลดหน้าเพื่อเล่นที่นี่'; ttGo.disabled = true; }
+    if (ev?.world && entered) game.feed(`🚀 ย้ายไปเมือง ${ev.world.world}`);
+  });
+  document.getElementById('ttAcc').onclick = () => { const b = document.getElementById('ttLoginBox'); b.hidden = !b.hidden; if (!b.hidden) document.getElementById('ttUser').focus(); };
+  for (const id of ['ttUser', 'ttPass']) document.getElementById(id).addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') document.getElementById('ttLogin').click(); });
+  document.getElementById('ttLogin').onclick = async () => {
+    ttStatus.textContent = 'กำลังเข้าสู่ระบบ…';
+    const r = await online.login(document.getElementById('ttUser').value.trim(), document.getElementById('ttPass').value);
+    if (!r.ok) { ttStatus.textContent = '⚠️ ' + r.err; return; }
+    enterCity(true);
+  };
+  // switched account from the friends menu → go straight in as that account
+  try { if (sessionStorage.getItem('vg:relogin')) { sessionStorage.removeItem('vg:relogin'); enterCity(true); } } catch { /* ignore */ }
 
-window.__vios = {
-  car, world, driver, online, garage, race, gfx, gov, game, social, enterGarage,
-  get police() { return police; }, get mode() { return mode; }, get build() { return build; }, get city() { return C; },
-  setMode, setHour: (h) => { hour = h; }, setWeather: (w) => gfx.set('weather', w),
-  bench: () => ({
-    fps: Math.round(gov.fps), p95Ms: Math.round(gov.p95Ms * 10) / 10, pr: Math.round(gov.pixelRatio() * 100) / 100,
-    calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
-    geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
-    heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
-  }),
-};
+  window.__vios = {
+    car, world, driver, online, garage, race, gfx, gov, game, social, enterGarage,
+    get police() { return police; }, get mode() { return mode; }, get build() { return build; }, get city() { return C; },
+    setMode, setHour: (h) => { hour = h; }, setWeather: (w) => gfx.set('weather', w),
+    bench: () => ({
+      fps: Math.round(gov.fps), p95Ms: Math.round(gov.p95Ms * 10) / 10, pr: Math.round(gov.pixelRatio() * 100) / 100,
+      calls: renderer.info.render.calls, triangles: renderer.info.render.triangles,
+      geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures,
+      heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null,
+    }),
+  };

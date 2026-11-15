@@ -51,7 +51,14 @@
 
   <aside id="panel">
     <button id="panelToggle" aria-label="เปิด/ปิดเมนู">☰ แต่งรถ</button>
-    <div id="saveBadge" title="บันทึกอัตโนมัติ">✓ บันทึกอัตโนมัติ</div>
+    <div id="pHead">
+      <div class="pname"><b id="pCar">—</b><span id="saveBadge" title="บันทึกอัตโนมัติ">✓ บันทึกอัตโนมัติ</span></div>
+      <div class="pact">
+        <button id="btnUndo" title="ย้อนกลับ (Ctrl+Z)" aria-label="ย้อนกลับ" disabled>↶</button>
+        <button id="btnRedo" title="ทำซ้ำ (Ctrl+Y)" aria-label="ทำซ้ำ" disabled>↷</button>
+        <button id="btnRandom" title="สุ่มสไตล์ใหม่" aria-label="สุ่มสไตล์">🎲 สุ่ม</button>
+      </div>
+    </div>
     <nav id="tabs"></nav>
     <div id="tabBody"></div>
   </aside>

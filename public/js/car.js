@@ -5,7 +5,9 @@ import { loadTemplate, getReadyTemplate, getWheelModel, makeGLBProfile } from '.
 import { makeProfile, buildBodyGeometry, conform, polyShape, lineShape, extrude } from './body.js';
 import { buildWheel, tireSpec, normalizeWheels, makeWheelMaterials } from './wheels.js';
 import { GENERATIONS, WHEEL_FINISHES, WHEEL_STYLES, FILM_TYPES, PLATE_STYLES, ADDONS } from './catalog.js';
-import { newPaint, setPaint, setCarbon, newGlass, setGlass, shared, getCarbonTexture } from './materials.js';
+import { newPaint, setPaint, setCarbon, newGlass, setGlass, shared, getCarbonTexture, makeLiveryState, attachLivery, drawNumberTexture, newNumberTexture, LIVERY_TYPES } from './materials.js';
+import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { bumperPart, skirtPart, archFlare, flareRivets, trunkSpoiler, shapeGeo, BUMPER_PROFILES, SKIRT_PROFILES, FLARE_SPECS } from './kit.js';
 
 // ---------- style tables (x = outward from lamp center, y = up), meters ----------
 const HEAD = {
@@ -107,6 +109,11 @@ export class Car {
       underglow: new THREE.MeshBasicMaterial({ color: '#00c8ff', transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
     };
     this.bodyMats = [m.paint, m.ws, m.side, m.rear, shared.black, m.roof, m.hood, m.paint];
+    // livery (stripes / two-tone / race number) is painted by the paint materials themselves
+    this.liv = makeLiveryState();
+    this.numTex = newNumberTexture();
+    this.liv.uNumTex.value = this.numTex;
+    for (const pm of [m.paint, m.roof, m.hood]) attachLivery(pm, this.liv);
     this.plateCanvas = document.createElement('canvas');
     this.plateCanvas.width = 680; this.plateCanvas.height = 300;
     this.plateTex = new THREE.CanvasTexture(this.plateCanvas);
@@ -144,7 +151,7 @@ export class Car {
       case 'paint': this.applyPaint(); break;
       case 'wheels': this.buildWheels(); this.applySuspension(); break;
       case 'glass': this.applyGlass(); this.buildKit(); break;
-      case 'kit': this.buildKit(); this.applyPaint(); break;
+      case 'kit': this.buildKit(); this.applyPaint(); this.updateFitment(); break;
       case 'lights': this.applyLights(); break;
       case 'suspension': this.applySuspension(); break;
       case 'plate': this.drawPlate(); this.buildBodyPlatesVisibility(); break;
@@ -200,7 +207,11 @@ export class Car {
       if (!o.isMesh) return;
       const r = o.userData.role;
       if (r === 'wheel') o.visible = false;
-      else if (r === 'paint') o.material = [m.paint, m.roof, m.hood, m.paint];
+      else if (r === 'paint') {
+        o.material = [m.paint, m.roof, m.hood, m.paint];
+        // the livery shader works in the chassis' own space, so give it the chassis' inverse world matrix
+        o.onBeforeRender = () => { this.liv.uCarInv.value.copy(this.chassis.matrixWorld).invert(); };
+      }
       else if (r === 'windows') o.material = [m.ws, m.side, m.rear];
       else if (r === 'head') { o.material = o.material.clone(); this.glbMats.head.push(o.material); }
       else if (r === 'tail') { o.material = o.material.clone(); o.material.userData.base = o.material.color.clone(); this.glbMats.tail.push(o.material); }
@@ -439,113 +450,142 @@ export class Car {
     disposeGroup(this.kitGroup);
     const P = this.P, k = this.b.kit, gen = this.gen, m = this.m;
     const clear = P.clear ?? gen.dims.clear;
-    const kitMat = { body: m.kit, black: shared.blackGloss, matte: shared.trimMatte, carbon: this.carbonMat() }[k.partColor] || m.kit;
+    const carbon = this.carbonMat();
+    const kitMat = { body: m.kit, black: shared.blackGloss, matte: shared.trimMatte, carbon }[k.partColor] || m.kit;
     const add = (geo, mat) => this.add(geo, mat, this.kitGroup);
+    const addGeo = (geo, mat) => { if (!geo) return null; const me = new THREE.Mesh(geo, mat); me.castShadow = true; me.receiveShadow = true; this.kitGroup.add(me); return me; };
     const sFb = P.section(P.xmax - 0.18), sRb = P.section(P.xmin + 0.16);
     const yfb = sFb.yb, yrb = sRb.yb;
     const hwF = sFb.hw, hwR = sRb.hw;
-    // plate that follows the bumper outline in plan view (robust under curved bumpers)
-    const outlinePlate = (front, y, h, out, back, mat) => {
-      const sec = front ? sFb : sRb, w = sec.hw - 0.05, edge = [];
-      for (let z = -w; z <= w + 1e-6; z += 0.04) {
-        const fx = front ? (P.frontAt(y + 0.04, z) ?? P.frontAt(y + 0.09, z)) : (P.rearAt(y + 0.04, z) ?? P.rearAt(y + 0.09, z));
-        if (fx !== null) edge.push([fx + (front ? out : -out), z]);
-      }
-      if (edge.length < 3) return;
-      const backEdge = edge.map(([x, z]) => [x - (front ? back : -back), z]).reverse();
-      const g = new THREE.ExtrudeGeometry(polyShape(edge.concat(backEdge).map(([x, z]) => [x, -z]), 0.01), { depth: h, bevelEnabled: true, bevelSize: 0.004, bevelThickness: 0.004, bevelSegments: 2 });
-      g.rotateX(-Math.PI / 2);
-      const mesh = new THREE.Mesh(g, mat);
-      mesh.position.y = y;
-      mesh.castShadow = true;
-      this.kitGroup.add(mesh);
-    };
-    // front
-    if (k.front === 'lip') outlinePlate(true, yfb - 0.03, 0.04, 0.03, 0.22, kitMat);
+    const fw = hwF - 0.06, rw = hwR - 0.06;
+    // ---- front ----
+    if (k.front === 'lip') addGeo(bumperPart(P, true, yfb - 0.02, BUMPER_PROFILES.frontLip, { halfW: fw }), kitMat);
     if (k.front === 'full') {
-      outlinePlate(true, yfb - 0.05, 0.06, 0.04, 0.26, kitMat);
-      for (const s of [1, -1]) add(conform(P, extrude(polyShape(shift([[-0.06, -0.025], [0.06, -0.025], [0.07, 0.025], [-0.06, 0.025]], hwF - 0.2, this.lowerY, s), 0.01), 0.008), 'front', { off: 0 }), shared.mesh);
+      addGeo(bumperPart(P, true, yfb - 0.03, BUMPER_PROFILES.frontApron, { halfW: fw }), kitMat);
+      addGeo(bumperPart(P, true, yfb - 0.075, BUMPER_PROFILES.frontLip, { halfW: fw - 0.03, rise: 0.02 }), carbon);
+      for (const s of [1, -1]) add(conform(P, extrude(polyShape(shift([[-0.06, -0.025], [0.06, -0.025], [0.07, 0.025], [-0.06, 0.025]], hwF - 0.2, this.lowerY, s), 0.01), 0.008), 'front', { off: 0.03 }), shared.mesh);
     }
     if (k.front === 'splitter') {
-      outlinePlate(true, yfb - 0.012, 0.01, 0.07, 0.32, this.carbonMat());
-      for (const s of [1, -1]) {
-        const cz = s * (hwF - 0.14), cy = this.lowerY;
-        const fx = P.frontAt(cy, cz);
+      addGeo(bumperPart(P, true, yfb - 0.012, BUMPER_PROFILES.frontSplitter, { halfW: fw + 0.02, rise: 0.04, taper: 0.1 }), carbon);
+      // support rods between splitter and bumper
+      for (const s of [1, -1]) for (const zz of [0.3, 0.58]) {
+        if (zz > fw - 0.05) continue;
+        const fx = P.frontAt(yfb + 0.05, zz);
         if (fx === null) continue;
-        const can = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.008, 0.16), this.carbonMat());
-        can.position.set(fx + 0.02, cy, cz + s * 0.03);
-        can.rotation.set(0, -s * 0.5, s * 0.12);
-        this.kitGroup.add(can);
+        const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.0045, 0.0045, 0.075, 8), shared.blackGloss);
+        rod.position.set(fx + 0.07, yfb + 0.028, s * zz);
+        this.kitGroup.add(rod);
       }
     }
-    // sides
+    if (k.canard) {
+      for (const s of [1, -1]) for (const [dy, cant] of [[0.05, 0.3], [0.1, 0.2]]) {
+        const z = s * (hwF - 0.1), y = yfb + dy;
+        const fx = P.frontAt(y, z) ?? P.frontAt(y, z * 0.9);
+        if (fx === null) continue;
+        const g = shapeGeo([[0.055, 0], [-0.045, 0], [-0.035, 0.085], [0.015, 0.1], [0.05, 0.075]], 0.006, 0.0015).rotateX(Math.PI / 2);
+        const c = new THREE.Mesh(g, carbon);
+        c.castShadow = true;
+        c.position.set(fx - 0.03, y, s * (hwF - 0.2));
+        c.rotation.x = -s * cant;
+        if (s < 0) { c.scale.z = -1; }
+        this.kitGroup.add(c);
+      }
+    }
+    // ---- sides ----
     if (k.side !== 'none') {
       const big = k.side === 'skirtBig';
       const x0 = P.rAx + P.tireR + 0.07, x1 = P.fAx - P.tireR - 0.07;
-      const yb = clear;
-      const pts = [[x0, yb - (big ? 0.045 : 0.025)], [x1, yb - (big ? 0.045 : 0.025)], [x1 + 0.02, yb + 0.075], [x0 - 0.02, yb + 0.075]];
-      for (const f of ['sideR', 'sideL']) add(conform(P, extrude(polyShape(pts, 0.015), big ? 0.045 : 0.026), f, { off: -0.008, yClamp: [yb + 0.13, yb + 0.3] }), kitMat);
+      for (const s of [1, -1]) addGeo(skirtPart(P, s, clear, x0, x1, big ? SKIRT_PROFILES.big : SKIRT_PROFILES.skirt), kitMat);
+      if (big) for (const s of [1, -1]) addGeo(skirtPart(P, s, clear - 0.05, x0 + 0.1, x1 - 0.1, [[-0.05, 0.012], [0.07, 0.01], [0.092, 0.0], [0.07, -0.01], [-0.05, -0.01]], { tail: 0.18 }), carbon);
     }
-    // over-fenders
-    if (k.fender === 'overfender') {
-      for (const ax of [P.fAx, P.rAx]) {
-        const Ra = P.tireR + 0.045, pts = [];
-        for (let i = 0; i <= 24; i++) { const a = -0.25 + (Math.PI + 0.5) * i / 24; pts.push([ax + Math.cos(a) * (Ra + 0.065), P.tireR + Math.sin(a) * (Ra + 0.065)]); }
-        for (let i = 24; i >= 0; i--) { const a = -0.25 + (Math.PI + 0.5) * i / 24; pts.push([ax + Math.cos(a) * (Ra - 0.004), P.tireR + Math.sin(a) * (Ra - 0.004)]); }
-        for (const f of ['sideR', 'sideL']) add(conform(P, extrude(polyShape(pts), 0.045, 4, 0.025), f, { off: -0.005, yClamp: [clear + 0.14, 5] }), kitMat);
-      }
-    }
-    // rear
-    if (k.rear === 'lip' || k.rear === 'diffuser') {
-      outlinePlate(false, yrb - 0.035, 0.04, 0.025, 0.2, k.rear === 'diffuser' ? this.carbonMat() : kitMat);
-      if (k.rear === 'diffuser') {
-        const xr = (P.rearAt(yrb + 0.04, 0) ?? P.xmin) - 0.01;
-        for (let z = -0.42; z <= 0.421; z += 0.14) {
-          const fin = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.075, 0.008), this.carbonMat());
-          fin.position.set(xr + 0.06, yrb - 0.035, z);
-          this.kitGroup.add(fin);
+    // ---- wheel-arch flares ----
+    this.flareOut = FLARE_SPECS[k.fender]?.out || 0;
+    if (this.flareOut) {
+      for (const ax of [P.fAx, P.rAx]) for (const s of [1, -1]) {
+        const fl = archFlare(P, ax, s, k.fender);
+        if (!fl) continue;
+        addGeo(fl.geo, kitMat);
+        const rv = flareRivets(P, ax, s, fl);
+        if (rv) {
+          const im = new THREE.InstancedMesh(rv.geo, shared.chrome, rv.mats.length);
+          rv.mats.forEach((mm, i) => im.setMatrixAt(i, mm));
+          this.kitGroup.add(im);
         }
       }
     }
-    // spoilers
-    const xTe = P.xmin + 0.19;
-    if (k.spoiler === 'lip' || k.spoiler === 'ducktail') {
-      const duck = k.spoiler === 'ducktail';
-      const len = duck ? 0.2 : 0.07, h = duck ? 0.065 : 0.022;
-      const w = P.section(xTe).hw * 0.86;
-      const g = extrude(polyShape([[xTe, -w], [xTe + len, -w * 0.97], [xTe + len, w * 0.97], [xTe, w]], 0.02), 1, 4, 0.03);
-      const p = g.attributes.position;
-      for (let i = 0; i < p.count; i++) { const t = 1 - (p.getX(i) - xTe) / len; p.setZ(i, p.getZ(i) * h * Math.pow(Math.max(0, t), 1.4) + 0.002); }
-      add(conform(P, g, 'top', { off: -0.003 }), kitMat);
+    // ---- rear ----
+    if (k.rear === 'lip') addGeo(bumperPart(P, false, yrb - 0.02, BUMPER_PROFILES.rearLip, { halfW: rw }), kitMat);
+    if (k.rear === 'diffuser') {
+      addGeo(bumperPart(P, false, yrb - 0.045, BUMPER_PROFILES.rearApron, { halfW: rw }), kitMat);
+      addGeo(bumperPart(P, false, yrb - 0.07, BUMPER_PROFILES.rearDiffuser, { halfW: rw * 0.8, taper: 0.1 }), carbon);
+      for (let z = -0.42; z <= 0.421; z += 0.14) {
+        const xr = (P.rearAt(yrb + 0.04, z) ?? P.xmin) - 0.0;
+        const fin = new THREE.Mesh(shapeGeo([[-0.03, -0.03], [-0.03, 0.082], [0.22, 0.04], [0.22, -0.03]], 0.007, 0.0015), carbon);
+        fin.position.set(xr, yrb - 0.07, z);
+        fin.castShadow = true;
+        this.kitGroup.add(fin);
+      }
     }
+    // ---- spoilers ----
+    const xTe = P.xmin + 0.19;
+    if (k.spoiler === 'lip' || k.spoiler === 'ducktail') addGeo(trunkSpoiler(P, k.spoiler === 'ducktail', xTe), kitMat);
     if (k.spoiler === 'wing' || k.spoiler === 'gtwing') {
       const gt = k.spoiler === 'gtwing';
       const xw = P.xmin + (gt ? 0.18 : 0.22);
       const topY = P.topAt(xw, 0.45) ?? gen.body.trunkY;
       const standH = gt ? 0.27 : 0.11;
       const span = gt ? 1.5 : 1.25;
+      const wingMat = gt ? carbon : kitMat;
       for (const z of [0.42, -0.42]) {
         const st = new THREE.Mesh(new THREE.BoxGeometry(gt ? 0.1 : 0.14, standH, 0.012), gt ? shared.blackGloss : kitMat);
         st.position.set(xw + 0.03, topY + standH / 2, z);
         st.rotation.z = gt ? -0.1 : 0;
+        st.castShadow = true;
         this.kitGroup.add(st);
+        // base plate where the stand meets the trunk
+        const bp = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.006, 0.05), shared.blackGloss);
+        bp.position.set(xw + 0.03, topY + 0.002, z); this.kitGroup.add(bp);
       }
       const foil = new THREE.Shape();
-      const c = gt ? 0.28 : 0.2;
+      const c = gt ? 0.3 : 0.2;
       foil.moveTo(c / 2, 0);
-      foil.bezierCurveTo(c * 0.2, 0.035, -c * 0.3, 0.03, -c / 2, 0.018);
+      foil.bezierCurveTo(c * 0.2, 0.04, -c * 0.3, 0.034, -c / 2, 0.018);
       foil.lineTo(-c / 2, 0.006);
-      foil.bezierCurveTo(-c * 0.2, -0.005, c * 0.2, -0.01, c / 2, 0);
-      const fg = new THREE.ExtrudeGeometry(foil, { depth: span, bevelEnabled: false, curveSegments: 12 });
+      foil.bezierCurveTo(-c * 0.2, -0.006, c * 0.2, -0.012, c / 2, 0);
+      const fg = new THREE.ExtrudeGeometry(foil, { depth: span, bevelEnabled: false, curveSegments: 16 });
       fg.translate(0, 0, -span / 2);
-      const wing = new THREE.Mesh(fg, gt ? this.carbonMat() : kitMat);
+      const wing = new THREE.Mesh(toCreasedNormals(fg, 0.9), wingMat);
+      wing.castShadow = true;
       wing.position.set(xw + 0.02, topY + standH, 0);
       wing.rotation.z = gt ? 0.12 : 0.05;
       this.kitGroup.add(wing);
-      if (gt) for (const z of [span / 2, -span / 2]) {
-        const ep = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.16, 0.008), this.carbonMat());
-        ep.position.set(xw, topY + standH - 0.03, z); this.kitGroup.add(ep);
+      if (gt) {
+        // gurney flap along the trailing edge + shaped end plates
+        const gf = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.026, span - 0.02), shared.blackGloss);
+        gf.position.set(-c / 2 + 0.004, 0.026, 0); gf.rotation.z = 0; wing.add(gf);
+        for (const z of [span / 2, -span / 2]) {
+          const ep = new THREE.Mesh(shapeGeo([[-0.19, -0.075], [0.17, -0.055], [0.2, 0.05], [0.08, 0.11], [-0.17, 0.1]], 0.007, 0.002), carbon);
+          ep.position.set(0, 0.012, z); wing.add(ep);
+        }
       }
+    }
+    // ---- hood vents / scoop ----
+    if (k.hoodMod && k.hoodMod !== 'none') this.buildHoodMod(k.hoodMod, kitMat, carbon);
+    // ---- tow hooks ----
+    if (k.towHook) {
+      const tm = new THREE.MeshStandardMaterial({ color: '#d9202a', metalness: 0.45, roughness: 0.3 });
+      const hook = (front) => {
+        const z = front ? 0.36 : -0.36, y = (front ? yfb : yrb) + 0.1;
+        const x = front ? P.frontAt(y, z) : P.rearAt(y, z);
+        if (x === null) return;
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.0085, 8, 20).rotateY(Math.PI / 2), tm);
+        ring.position.set(x + (front ? 0.026 : -0.026), y, z);
+        const base = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 12).rotateZ(Math.PI / 2), shared.blackGloss);
+        base.position.set(x + (front ? 0.004 : -0.004), y, z);
+        ring.castShadow = true;
+        this.kitGroup.add(ring, base);
+      };
+      hook(true); hook(false);
     }
     // exhaust
     {
@@ -592,6 +632,62 @@ export class Car {
       const xf = P.xRgTop + 0.2;
       const fin = this.add(g, this.b.paint.roof === 'body' ? m.paint : m.roof, this.kitGroup);
       fin.position.set(xf + 0.17, Math.min(P.topAt(xf, 0) ?? P.roofY, P.topAt(xf + 0.17, 0) ?? P.roofY) - 0.006, 0);
+    }
+  }
+
+  // Hood details sit on the real hood surface (ray cast), tilted to follow its slope.
+  buildHoodMod(kind, kitMat, carbon) {
+    const P = this.P, m = this.m;
+    const x0 = (P.xWsBase ?? 0.3) + 0.12, x1 = P.xmax - 0.36, xm = (x0 + x1) / 2;
+    const surf = (x, z = 0) => P.topAt(x, z);
+    const slope = (x, z = 0) => { const a = surf(x - 0.12, z), b = surf(x + 0.12, z); return a != null && b != null ? Math.atan2(b - a, 0.24) : 0; };
+    const put = (obj, x, z, lift = 0) => {
+      const y = surf(x, z);
+      if (y == null) return false;
+      obj.position.set(x, y + lift, z);
+      obj.rotation.z = slope(x, z);
+      obj.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+      this.kitGroup.add(obj);
+      return true;
+    };
+    const slat = (len, wid, mat) => new THREE.Mesh(new THREE.BoxGeometry(len, 0.01, wid), mat);
+    if (kind === 'vents') {
+      for (const s of [1, -1]) {
+        const g = new THREE.Group();
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.006, 0.17), shared.black);
+        plate.position.y = 0.001; g.add(plate);
+        for (let i = 0; i < 6; i++) {
+          const sl = slat(0.3, 0.014, carbon);
+          sl.position.set(0, 0.006, -0.07 + i * 0.028);
+          sl.rotation.x = 0.0; sl.rotation.z = 0.0;
+          g.add(sl);
+        }
+        // frame
+        for (const [sx, sz, px, pz] of [[0.36, 0.012, 0, 0.09], [0.36, 0.012, 0, -0.09], [0.012, 0.19, 0.18, 0], [0.012, 0.19, -0.18, 0]]) {
+          const f = new THREE.Mesh(new THREE.BoxGeometry(sx, 0.012, sz), carbon); f.position.set(px, 0.005, pz); g.add(f);
+        }
+        g.rotation.y = s * 0.18;
+        const holder = new THREE.Group(); holder.add(g);
+        put(holder, xm + 0.04, s * 0.37, 0.002);
+      }
+    } else if (kind === 'louver') {
+      const g = new THREE.Group();
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.006, 0.6), shared.black); plate.position.y = 0.001; g.add(plate);
+      for (let i = 0; i < 6; i++) {
+        const sl = slat(0.034, 0.56, i % 2 ? carbon : kitMat === m.kit ? carbon : kitMat);
+        sl.position.set(-0.15 + i * 0.06, 0.012, 0);
+        sl.rotation.z = 0.55; // gills open towards the windshield
+        g.add(sl);
+      }
+      for (const z of [0.3, -0.3]) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.016, 0.012), carbon); f.position.set(0, 0.006, z); g.add(f); }
+      put(g, xm + 0.02, 0, 0.001);
+    } else if (kind === 'scoop') {
+      const g = new THREE.Group();
+      const body = new THREE.Mesh(shapeGeo([[-0.26, -0.02], [-0.22, 0.012], [-0.02, 0.06], [0.16, 0.085], [0.23, 0.078], [0.23, -0.02]], 0.36, 0.004), m.hood);
+      g.add(body);
+      const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.05, 0.29), shared.black); mouth.position.set(0.231, 0.04, 0); g.add(mouth);
+      const rim = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.062, 0.31), carbon); rim.position.set(0.232, 0.04, 0); g.add(rim);
+      put(g, xm, 0, 0);
     }
   }
 
@@ -657,8 +753,9 @@ export class Car {
     if (!this.fitInfo || !this.fitment) return;
     const { trackZ, hwAx, To, sw, camberTuck } = this.fitInfo;
     const d = this.susp();
-    const arch = this.P.tireR + 0.045;
-    this.fitment.poke = Math.round((trackZ + sw / 2 - camberTuck - hwAx) * 1000);
+    const arch = this.P.tireR + 0.045 + (this.flareOut ? 0.02 : 0);
+    // flares / widebody fenders extend the body outwards, so wider wheels can sit flush
+    this.fitment.poke = Math.round((trackZ + sw / 2 - camberTuck - hwAx - (this.flareOut || 0)) * 1000);
     this.fitment.gap = Math.round((arch - d.f - To) * 1000);
     this.fitment.gapRear = Math.round((arch - d.r - To) * 1000);
   }
@@ -772,6 +869,23 @@ export class Car {
     else if (p.mirror === 'carbon') setCarbon(m.mirror);
     else setPaint(m.mirror, '#f4f4f4', 'chrome');
     setPaint(m.kit, p.color, p.finish);
+    this.applyLivery();
+  }
+
+  applyLivery() {
+    const p = this.b.paint, L = this.liv, P = this.P, gen = this.gen;
+    const idx = this.tpl ? Math.max(0, LIVERY_TYPES.indexOf(p.livery || 'none')) : 0; // parametric body has no car-space frame
+    L.uLivType.value = idx;
+    L.uLivC1.value.set(p.liveryColor || '#ffffff');
+    L.uLivC2.value.set(p.livery2 || '#c8102e');
+    L.uLivW.value = p.liveryW ?? 0.5;
+    L.uLivBox.value.set(P.xmin, P.xmax, gen.body.beltY, P.roofY);
+    const on = !!(this.tpl && p.numberOn && p.number);
+    L.uNumOn.value = on ? 1 : 0;
+    if (on) {
+      drawNumberTexture(this.numTex, p.number, p.numberBg || '#ffffff', p.numberFg || '#111111');
+      L.uNumPos.value.set(((P.fAx ?? 1) + (P.rAx ?? -1)) / 2 + 0.08, 0.3 + (gen.body.beltY - 0.3) * 0.5, 0.17);
+    }
   }
 
   applyGlass() {

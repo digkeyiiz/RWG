@@ -255,10 +255,26 @@ export const PAINT_FINISHES = [
   { id: 'metallic', name: 'เมทัลลิก' },
   { id: 'pearl', name: 'มุก (Pearl)' },
   { id: 'candy', name: 'แคนดี้' },
+  { id: 'chameleon', name: 'แปรงสี (Chameleon)' },
+  { id: 'flake', name: 'เกล็ดเมทัลลิกหยาบ' },
   { id: 'satin', name: 'ซาติน' },
   { id: 'matte', name: 'ด้าน (Matte)' },
   { id: 'chrome', name: 'โครม' },
 ];
+
+// Livery (stripes, two-tone…) is painted in the shader in car space — see materials.js. Order = shader branch index.
+export const LIVERIES = [
+  { id: 'none', name: 'ไม่ติดลาย' },
+  { id: 'twin', name: 'คาดคู่กลางคัน (Racing)' },
+  { id: 'center', name: 'คาดเส้นใหญ่กลางคัน' },
+  { id: 'side', name: 'เส้นข้างตัว' },
+  { id: 'twinSide', name: 'เส้นข้างคู่' },
+  { id: 'slant', name: 'ลายเฉียง (Swoosh)' },
+  { id: 'rocker', name: 'ทูโทนช่วงล่าง' },
+  { id: 'fade', name: 'ไล่สีท้ายคัน' },
+];
+// colour presets for stripes / accents
+export const LIVERY_COLORS = ['#ffffff', '#0c0c0e', '#c8102e', '#ff5a1f', '#ffb000', '#f5e050', '#00a86b', '#00b5c8', '#1e90ff', '#6a3fb5', '#ff4fa3', '#a8adb3'];
 
 export const EXTRA_COLORS = [
   '#ffffff', '#e9e9e9', '#a8adb3', '#3a3d42', '#000000', '#c8102e', '#ff5a1f', '#ffb000',
@@ -330,7 +346,15 @@ export const KIT = {
   ],
   fender: [
     { id: 'none', name: 'ซุ้มเดิม' },
+    { id: 'flare', name: 'คิ้วซุ้มบาง (Flare)' },
     { id: 'overfender', name: 'โป่งล้อ (Over-fender)' },
+    { id: 'wide', name: 'ไวด์บอดี้ (Widebody)' },
+  ],
+  hoodMod: [
+    { id: 'none', name: 'เรียบ' },
+    { id: 'vents', name: 'ช่องระบายความร้อน' },
+    { id: 'louver', name: 'ครีบระบายอากาศ' },
+    { id: 'scoop', name: 'สกู๊ปดูดอากาศ' },
   ],
   spoiler: [
     { id: 'none', name: 'ไม่มี' },
@@ -393,13 +417,14 @@ export const PLATE_STYLES = [
 export const DEFAULT_BUILD = {
   name: 'คันแรกของฉัน',
   gen: 'gen2',
-  paint: { color: '#3d4f63', finish: 'metallic', roof: 'body', roofColor: '#0d0e11', hood: 'body', mirror: 'body' },
+  paint: { color: '#3d4f63', finish: 'metallic', roof: 'body', roofColor: '#0d0e11', hood: 'body', mirror: 'body',
+           livery: 'none', liveryColor: '#ffffff', livery2: '#c8102e', liveryW: 0.5, numberOn: false, number: '86', numberBg: '#ffffff', numberFg: '#111111' },
   wheels: { style: 'oem', brand: 'oem', rim: 15, rimWidth: 6.0, tireWidth: 185, aspect: 60, offset: 45, spacer: 0, camber: 0,
             finish: 'silver', color: '#c9ccd1', lip: false, caliper: '#3a3a3a', bigBrake: false,
             tireType: 'comfort', tireBrand: 'generic', tireLetters: 'black' },
   glass: { windshield: 40, windshieldFilm: 'black', side: 60, sideFilm: 'black', rear: 60, rearFilm: 'black', visor: false },
   kit: { front: 'oem', side: 'none', rear: 'none', fender: 'none', spoiler: 'none', exhaust: 'oem',
-         exhaustFinish: 'chrome', partColor: 'body', sharkfin: true },
+         exhaustFinish: 'chrome', partColor: 'body', sharkfin: true, hoodMod: 'none', canard: false, towHook: false },
   lights: { head: false, headTint: 'clear', tailTint: 'red', underglow: 'none', underglowColor: '#00c8ff' },
   suspension: { type: 'oem', drop: 0, dropRear: 0, linked: true, damping: 8, spring: 2.5, airUp: false },
   plate: { style: 'white', line1: 'กข 1234', line2: 'กรุงเทพมหานคร' },
@@ -471,10 +496,30 @@ export const KIT_PACKAGES = [
   {
     id: 'style-timeattack', name: 'สายสนาม / Time Attack (สไตล์)', brand: 'สไตล์แต่ง', origin: 'สไตล์', gens: null, verified: null,
     desc: 'แนวรถแข่ง: สปลิตเตอร์คาร์บอน, โป่งล้อ, GT Wing, ดิฟฟิวเซอร์, ล้อ 6 ก้านสนาม, เบรกใหญ่',
-    apply: { kit: { front: 'splitter', side: 'skirtBig', rear: 'diffuser', fender: 'overfender', spoiler: 'gtwing', exhaust: 'single', exhaustFinish: 'burnt', partColor: 'carbon' },
+    apply: { kit: { front: 'splitter', side: 'skirtBig', rear: 'diffuser', fender: 'overfender', spoiler: 'gtwing', exhaust: 'single', exhaustFinish: 'burnt', partColor: 'carbon', hoodMod: 'vents', canard: true },
              wheels: { style: 'spoke6', brand: 'rays', rim: 17, rimWidth: 8.5, tireWidth: 225, tireType: 'semislick', offset: 25, camber: -2.5, finish: 'white', lip: false, bigBrake: true, caliper: '#ffb000' }, suspension: { type: 'coilover', drop: 45, dropRear: 45 } },
   },
   {
+    id: 'style-drift', name: 'สายดริฟต์ (สไตล์)', brand: 'สไตล์แต่ง', origin: 'สไตล์', gens: null, verified: null,
+    desc: 'รถดริฟต์สไตล์ญี่ปุ่น: ลายเฉียงส้ม-ขาว เลขแข่งที่ประตู, ซุ้มบางโป่งนิดๆ, ฝากระโปรงเจาะช่องระบายความร้อน, ปีกยกขา, ท่อไทเทเนียมไหม้, ล้อ 10 ก้านบรอนซ์ แคมเบอร์หลังกด',
+    apply: { kit: { front: 'lip', side: 'skirtBig', rear: 'lip', fender: 'flare', spoiler: 'wing', exhaust: 'dual', exhaustFinish: 'burnt', partColor: 'black', hoodMod: 'vents', towHook: true },
+             wheels: { style: 'split5', brand: 'work', rim: 17, rimWidth: 8.5, tireWidth: 225, tireType: 'semislick', offset: 22, camber: -4, finish: 'bronze', lip: false }, suspension: { type: 'coilover', drop: 55, dropRear: 55 },
+             paint: { livery: 'slant', liveryColor: '#ff5a1f', livery2: '#ffffff', liveryW: 0.55, numberOn: true, number: '86', numberBg: '#ffffff', numberFg: '#111111' } },
+  },
+  {
+    id: 'style-rally', name: 'สายแรลลี่ (สไตล์)', brand: 'สไตล์แต่ง', origin: 'สไตล์', gens: null, verified: null,
+    desc: 'แรลลี่สายลุย: สกู๊ปฝากระโปรง, ซุ้มโป่งหมุดย้ำ, ปีกยกขา, ห่วงลากจูง, เส้นข้างคู่ + เลขแข่ง, ล้อก้านไขว้ขาว ช่วงล่างสูงกว่าสายสนาม',
+    apply: { kit: { front: 'lip', side: 'skirt', rear: 'lip', fender: 'overfender', spoiler: 'wing', exhaust: 'single', exhaustFinish: 'black', partColor: 'black', hoodMod: 'scoop', towHook: true, canard: false },
+             wheels: { style: 'mesh', brand: 'enkei', rim: 16, rimWidth: 7.5, tireWidth: 205, tireType: 'comfort', offset: 30, camber: -1, finish: 'white', lip: false }, suspension: { type: 'lowering', drop: 15, dropRear: 15 },
+             paint: { livery: 'twinSide', liveryColor: '#ffd400', liveryW: 0.7, numberOn: true, number: '7', numberBg: '#ffffff', numberFg: '#111111' } },
+  },
+  {
+    id: 'style-stance', name: 'สายสแตนซ์ / โชว์ (สไตล์)', brand: 'สไตล์แต่ง', origin: 'สไตล์', gens: null, verified: null,
+    desc: 'โหลดติดพื้นถุงลม ล้อขอบลึกโครมคว่ำหนัก ซุ้มไวด์บอดี้ เรียบหรูไม่มีปีก สีแคนดี้ลึก',
+    apply: { kit: { front: 'lip', side: 'skirt', rear: 'lip', fender: 'wide', spoiler: 'ducktail', exhaust: 'dual', exhaustFinish: 'chrome', partColor: 'body', hoodMod: 'none', towHook: false, canard: false },
+             wheels: { style: 'dish', brand: 'work', rim: 17, rimWidth: 8.5, tireWidth: 215, offset: 18, camber: -6, finish: 'chrome', lip: true }, suspension: { type: 'air', drop: 115, dropRear: 115 },
+             paint: { finish: 'candy', livery: 'none', numberOn: false } },
+  },  {
     id: 'style-oemplus', name: 'แต่งเรียบ OEM+ (สไตล์)', brand: 'สไตล์แต่ง', origin: 'สไตล์', gens: null, verified: null,
     desc: 'แต่งเนียนเหมือนออกจากโรงงาน: ลิ้นรอบคันสีเดียวกับรถ, ล้อ 16" ลายทั่วไป, โหลดนิดหน่อย, กันสาด',
     apply: { kit: { front: 'lip', side: 'skirt', rear: 'none', fender: 'none', spoiler: 'lip', exhaust: 'oem', exhaustFinish: 'chrome', partColor: 'body' },
