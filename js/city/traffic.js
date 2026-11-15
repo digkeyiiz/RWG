@@ -132,8 +132,8 @@ export class Traffic {
       near.push([d, c]);
     }
     near.sort((a, b) => a[0] - b[0]);
-    const lim = Math.min(8, this.opts.nearN || 8);
-    const show = new Set(near.slice(0, lim).filter(([d]) => d < 180 * 180).map(([, c]) => c));
+    const lim = Math.min(5, this.opts.nearN || 5);
+    const show = new Set(near.slice(0, lim).filter(([d]) => d < 150 * 150).map(([, c]) => c));
     let built = 0;
     for (const [, c] of near) {
       const on = show.has(c);
@@ -141,7 +141,7 @@ export class Traffic {
         c.mesh.remove(c.real);
         c.real = null;
       }
-      if (on && !c.real && built < 2) {
+      if (on && !c.real && built < 1) {
         const pr = protos[Math.floor(c.pick * protos.length)];
         c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
         c.realCount = protos.length;

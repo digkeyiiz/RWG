@@ -19,7 +19,7 @@ export const BOT_NEONS = ['#00e5ff', '#ff2a85', '#ffb02e', '#38ff88', '#a855f7']
 const paintCache = new Map();
 export function paintMat(color) {
   let m = paintCache.get(color);
-  if (!m) { m = new THREE.MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.32, envMapIntensity: 1.1 }); paintCache.set(color, m); }
+  if (!m) { m = new THREE.MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.32, envMapIntensity: 1.1, side: THREE.DoubleSide }); paintCache.set(color, m); }
   return m;
 }
 const rimCache = new Map();
@@ -232,17 +232,14 @@ async function loadBotFile(g) {
   return { gen: g, parts, L: box.max.x - box.min.x, W: box.max.z - box.min.z };
 }
 
-// load bot cars from full GLB templates via makeProto (clean geometry, fast merged meshes, ~6 draw calls/car)
+// load lightweight bot models (models/bots/*.glb, 0.2-0.6 MB each) for smooth 60 FPS
 export function loadBotModels(limit = BOT_GENS.length, first = null) {
   if (loading && loading.limit >= limit) return loading;
   const order = [...BOT_GENS].sort((a, b) => (b.id === first) - (a.id === first));
   loading = (async () => {
     for (const g of order.slice(0, limit)) {
       if (protos.has(g.id)) continue;
-      try {
-        const tpl = getReadyTemplate(g.glb) || await loadTemplate(g.glb, g.glbConfig || {});
-        if (tpl) protos.set(g.id, makeProto(g, tpl));
-      } catch (e) { console.warn('bot model failed', g.id, e); }
+      try { protos.set(g.id, await loadBotFile(g)); } catch (e) { console.warn('bot model failed', g.id, e); }
       await new Promise((r) => setTimeout(r, 40));
     }
     return botReady();

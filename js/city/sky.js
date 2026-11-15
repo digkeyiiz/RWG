@@ -68,7 +68,7 @@ export class Sky {
   // Image-based lighting from the live sky: cars/wet roads reflect the real sky colours & clouds.
   // Re-bakes only when the hour or wetness moved enough (cheap: dome only, no city geometry).
   updateEnv(renderer, hour, wet = 0, force = false) {
-    if (!force && this._envHour !== undefined && Math.abs(hour - this._envHour) < 0.12 && Math.abs(wet - this._envWet) < 0.15) return;
+    if (!force && this._envHour !== undefined && Math.abs(hour - this._envHour) < 1.0 && Math.abs(wet - this._envWet) < 0.25) return;
     if (!this._pmrem) {
       this._pmrem = new THREE.PMREMGenerator(renderer);
       this._envScene = new THREE.Scene();

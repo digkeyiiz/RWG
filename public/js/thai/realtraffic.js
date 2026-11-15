@@ -122,7 +122,7 @@ export class RealTraffic {
       });
     }
     this._lodT = 0;
-    this._nearLimit = Math.min(8, Math.max(4, Math.round(this.count * 0.2)));
+    this._nearLimit = Math.min(5, Math.max(3, Math.round(this.count * 0.15)));
 
     this._dummy = new THREE.Object3D();
     this._zeroMat = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -479,7 +479,7 @@ export class RealTraffic {
         this.group.remove(c.real);
         c.real = null;
       }
-      if (on && !c.real && built < 2) {
+      if (on && !c.real && built < 1) {
         const pr = protos[Math.floor(c.pick * protos.length)];
         c.real = makeBotBody(pr, c.custom.paint, false, c.custom);
         c.realCount = protos.length;
