@@ -12,7 +12,6 @@ import { computePerf } from './engine.js';
 import { GfxSettings, settingsPanel, FrameGovernor, SHADOW_SIZE, VIEW, TRAFFIC } from './settings.js';
 import { Race } from './race.js';
 import { GameWorld } from './game.js';
-import { Police } from './police.js';
 import { Social } from './social.js';
 import * as ECON from './economy.js';
 import { GARAGES } from './places.js';
@@ -152,7 +151,7 @@ const race = new Race({
   hooks: {
     enterCity: async () => { if (mode !== 'city') await setMode('city'); },
     spawn: (sp) => spawnRaw(sp),
-    setTraffic: (v) => { raceTraffic = v; syncTraffic(); if (v !== null) police?.cancel(); },
+    setTraffic: (v) => { raceTraffic = v; syncTraffic(); },
     reward: (res) => { game.updateWallet(res.prize); if (res.prize) { game.popGain('+฿' + res.prize.toLocaleString(), true); game.sound('big'); } game.feed(`🏆 ได้รางวัล <b>฿${res.prize.toLocaleString()}</b> · +${res.rep} REP`, 'gold'); },
   },
 });
@@ -165,11 +164,11 @@ const game = new GameWorld({
   hooks: {
     enterGarage: (m) => enterGarage(m),
     minimap: () => C?.minimap,
-    chased: () => !!police?.active,
-    hide: () => (police ? police.tryHide() : true),
+    chased: () => false,
+    hide: () => true,
   },
 });
-let police = null;
+const police = null;
 panel.shop = {
   owns: (k) => online.owns(k),
   money: () => online.me?.money ?? 0,
@@ -304,16 +303,6 @@ async function ensureCity() {
   rebuildTraffic();
   race.setWorld(city, touge);
   game.buildMarkers(race.tracks, touge);
-  police = new Police({
-    scene, city, touge, driver, online, toast,
-    hooks: {
-      racing: () => race.active,
-      sound: () => driver.soundOn,
-      notify: (html, cls = '', delta = 0) => { game.feed(html, cls); if (delta) { game.updateWallet(delta); if (delta > 0) { game.popGain('+฿' + delta.toLocaleString(), true); game.sound('big'); } } },
-      impound: () => { if (race.active) race.abort(); spawnAt(garageSpawn(GARAGES[0])); },
-    },
-  });
-  police.setPatrols(gfx.get('preset') === 'low' ? 3 : 5);
   ld.classList.add('hide');
   if (gfx.get('bots') === 'real') setTimeout(loadBots, 1500);
   return C;
@@ -338,12 +327,11 @@ function syncTraffic() {
   if (C.traffic) C.traffic.group.visible = mode === 'city' && trafficActive();
   C.city.group.visible = mode === 'city' && isBkk;
   game.group.visible = mode === 'city' && isBkk;
-  if (police) police.group.visible = mode === 'city' && isBkk;
   for (const [k, m] of Object.entries(realMaps)) m.group.visible = mode === 'city' && cityMap === k;
   if (realTraffic) realTraffic.setVisible(mode === 'city' && !!rm && trafficOn);
   if (mode === 'city') {
     if (rm) driver.setEnv({ colliders: rm.colliders, surfaces: rm.surfaces, traffic: trafficOn ? realTraffic : null, peers: online, bots: null, cops: null, surfaceMu });
-    else driver.setEnv({ colliders: C.city.colliders, surfaces: C.city.surfaces, traffic: trafficActive() ? C.traffic : null, peers: online, bots: race, cops: police, surfaceMu });
+    else driver.setEnv({ colliders: C.city.colliders, surfaces: C.city.surfaces, traffic: trafficActive() ? C.traffic : null, peers: online, bots: race, cops: null, surfaceMu });
   }
 }
 // grip of the surface under the car: asphalt 1, grass/dirt off the road 0.55-0.65
@@ -620,7 +608,7 @@ function frame(now) {
           g.beginPath(); g.moveTo(R, R - 10); g.lineTo(R + 7, R + 8); g.lineTo(R, R + 4); g.lineTo(R - 7, R + 8); g.closePath(); g.fill(); g.stroke();
         } else {
           const rr = race.route();
-          C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, game.icons().concat(police ? police.dots().map((d) => ({ ...d, kind: 'cop' })) : []));
+          C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, game.icons());
         }
       }
     } else { sun.position.copy(cp).add(new THREE.Vector3(4, 8, 3)); sun.castShadow = sun.userData.shadowOn; }
@@ -637,8 +625,6 @@ function frame(now) {
     if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
     if (mode === 'city' && !activeRealMap()) {
       game.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z }, driver.vel.length(), mode);
-      police?.update(dt, { x: cp.x, y: driver.y || 0, z: cp.z, vx: driver.vel.x, vz: driver.vel.z, speed: driver.vel.length() }, mode);
-      police?.share(dt);
     }
   }
   online.update(dt, mode, night);
