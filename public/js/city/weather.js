@@ -57,14 +57,16 @@ export class Weather {
   }
 
   update(dt, carPos, vel, city, sky, fogMul = 1) {
+    timeUniform.value += dt;
     const wantWet = this.mode === 'rain' ? 1 : 0;
     if (Math.abs(this.wet - wantWet) > 0.001) {
       this.wet += (wantWet - this.wet) * Math.min(1, dt * 1.5);
+      wetUniform.value = this.wet;
       const w = this.wet;
       if (city?.M) {
-        if (city.M.asphalt) { city.M.asphalt.roughness = 0.9 - w * 0.78; city.M.asphalt.metalness = w * 0.3; }
-        if (city.M.deckTop) { city.M.deckTop.roughness = 0.88 - w * 0.76; city.M.deckTop.metalness = w * 0.3; }
-        if (city.M.paving) { city.M.paving.roughness = 0.9 - w * 0.52; city.M.paving.metalness = w * 0.25; }
+        if (city.M.asphalt) city.M.asphalt.metalness = w * 0.25;
+        if (city.M.deckTop) city.M.deckTop.metalness = w * 0.25;
+        if (city.M.paving) city.M.paving.metalness = w * 0.18;
       }
     }
 

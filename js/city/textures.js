@@ -33,33 +33,89 @@ export const FACADE_TYPES = Object.keys(FACADES);
 export function facadeTextures(type, seed = 1) {
   const f = FACADES[type], r = rng(seed);
   const lit = [];
-  const draw = (night) => (g, W, H) => {
+  const draw = (mode) => (g, W, H) => {
     const bw = W / 4, fh = H / 4;
-    g.fillStyle = night ? shade(f.wall, 0.12) : f.wall; g.fillRect(0, 0, W, H);
-    if (!night) noise(g, W, H, 900, 90, 170);
+    if (mode === 'rough') {
+      g.fillStyle = f.glassy ? '#8c8c8c' : '#e4e4e4';
+      g.fillRect(0, 0, W, H);
+    } else {
+      g.fillStyle = mode === 'night' ? shade(f.wall, 0.12) : f.wall;
+      g.fillRect(0, 0, W, H);
+      if (mode === 'day') {
+        noise(g, W, H, 1800, 85, 175);
+        // Subtle vertical weathering streaks
+        for (let sx = 0; sx < W; sx += 16) {
+          if (r() < 0.35) {
+            const grd = g.createLinearGradient(0, 0, 0, H);
+            grd.addColorStop(0, 'rgba(0,0,0,0.08)');
+            grd.addColorStop(1, 'rgba(0,0,0,0.0)');
+            g.fillStyle = grd;
+            g.fillRect(sx, 0, 6 + r() * 8, H);
+          }
+        }
+      }
+    }
     for (let fy = 0; fy < 4; fy++) for (let bx = 0; bx < 4; bx++) {
       const ww = bw * f.winW, wh = fh * f.winH;
       const x = bx * bw + (bw - ww) / 2, y = fy * fh + fh * 0.18;
       const idx = fy * 4 + bx;
-      if (night) {
+      if (mode === 'rough') {
+        g.fillStyle = '#5a5a5a'; g.fillRect(x - 4, y - 4, ww + 8, wh + 8);
+        g.fillStyle = f.glassy ? '#181818' : '#262626';
+        g.fillRect(x, y, ww, wh);
+        continue;
+      }
+      if (mode === 'night') {
         if (lit[idx] === undefined) lit[idx] = r() < 0.58 ? (r() < 0.65 ? '#ffd9a0' : '#c8e4ff') : null;
         g.fillStyle = lit[idx] || '#05070a';
         g.fillRect(x, y, ww, wh);
-        if (lit[idx]) { g.fillStyle = 'rgba(0,0,0,0.25)'; g.fillRect(x + ww * (0.2 + r() * 0.5), y, ww * 0.12, wh); }
+        if (lit[idx]) {
+          g.fillStyle = 'rgba(0,0,0,0.28)';
+          g.fillRect(x + ww * (0.2 + r() * 0.5), y, ww * 0.12, wh);
+          g.fillStyle = 'rgba(0,0,0,0.18)';
+          g.fillRect(x, y, ww, wh * 0.16);
+        }
       } else {
-        g.fillStyle = f.frame; g.fillRect(x - 3, y - 3, ww + 6, wh + 6);
+        // Window frame + recessed sill AO
+        g.fillStyle = 'rgba(0,0,0,0.28)'; g.fillRect(x - 4, y + wh + 2, ww + 8, 5);
+        g.fillStyle = f.frame; g.fillRect(x - 4, y - 4, ww + 8, wh + 8);
         const grd = g.createLinearGradient(x, y, x + ww, y + wh);
-        grd.addColorStop(0, shade(f.win, 1.55)); grd.addColorStop(0.5, f.win); grd.addColorStop(1, shade(f.win, 1.25));
+        grd.addColorStop(0, shade(f.win, 1.65)); grd.addColorStop(0.5, f.win); grd.addColorStop(1, shade(f.win, 1.25));
         g.fillStyle = grd; g.fillRect(x, y, ww, wh);
-        if (f.glassy) { g.fillStyle = 'rgba(165,215,250,0.22)'; g.fillRect(x, y, ww * 0.38, wh); }
-        g.fillStyle = f.frame; g.fillRect(x + ww / 2 - 1, y, 2, wh);
+        // Interior blind / depth hint
+        if (r() < 0.45) {
+          g.fillStyle = 'rgba(220,230,240,0.14)';
+          g.fillRect(x + 2, y + 2, ww - 4, wh * (0.25 + r() * 0.35));
+        }
+        if (f.glassy) {
+          const refl = g.createLinearGradient(x, y, x + ww * 0.55, y + wh);
+          refl.addColorStop(0, 'rgba(185,225,255,0.28)');
+          refl.addColorStop(1, 'rgba(185,225,255,0.02)');
+          g.fillStyle = refl; g.fillRect(x, y, ww * 0.55, wh);
+        }
+        g.fillStyle = f.frame;
+        g.fillRect(x + ww / 2 - 1.5, y, 3, wh);
+        g.fillRect(x, y + wh * 0.48, ww, 2);
       }
-      if (f.balcony && !night) { g.fillStyle = 'rgba(240,240,236,0.95)'; g.fillRect(bx * bw + 2, y + wh * 0.62, bw - 4, wh * 0.42 + fh * 0.12); g.fillStyle = 'rgba(120,120,115,0.6)'; for (let k = 0; k < 8; k++) g.fillRect(bx * bw + 4 + k * (bw - 8) / 8, y + wh * 0.62, 1.5, wh * 0.42); }
-      if (f.ac && !night && r() < 0.45) { g.fillStyle = '#dcdcd6'; g.fillRect(x + ww + 2, y + wh * 0.5, bw * 0.16, fh * 0.16); }
-      g.fillStyle = night ? '#000' : 'rgba(0,0,0,0.12)'; g.fillRect(0, (fy + 1) * fh - 3, W, 3);
+      if (f.balcony && mode === 'day') {
+        g.fillStyle = 'rgba(0,0,0,0.22)'; g.fillRect(bx * bw + 2, y + wh * 0.62 + wh * 0.42 + fh * 0.12, bw - 4, 4);
+        g.fillStyle = 'rgba(240,240,236,0.95)'; g.fillRect(bx * bw + 2, y + wh * 0.62, bw - 4, wh * 0.42 + fh * 0.12);
+        g.fillStyle = 'rgba(110,110,105,0.65)';
+        for (let k = 0; k < 8; k++) g.fillRect(bx * bw + 4 + k * (bw - 8) / 8, y + wh * 0.62, 2, wh * 0.42);
+      }
+      if (f.ac && mode === 'day' && r() < 0.45) {
+        g.fillStyle = '#dcdcd6'; g.fillRect(x + ww + 2, y + wh * 0.5, bw * 0.16, fh * 0.16);
+        g.fillStyle = '#4a5058'; g.fillRect(x + ww + 4, y + wh * 0.52, bw * 0.11, fh * 0.11);
+      }
+      g.fillStyle = mode === 'night' ? '#000' : 'rgba(0,0,0,0.16)';
+      g.fillRect(0, (fy + 1) * fh - 4, W, 4);
     }
   };
-  return { map: tex(256, 256, draw(false)), emissive: tex(256, 256, draw(true)) };
+  return {
+    map: tex(512, 512, draw('day')),
+    emissive: tex(512, 512, draw('night')),
+    roughnessMap: tex(256, 256, draw('rough'), { srgb: false }),
+  };
 }
 
 function shade(hex, k) {
@@ -412,7 +468,18 @@ export function pavingTexture() {
   });
 }
 export function grassTexture() {
-  return tex(128, 128, (g, W, H) => { g.fillStyle = '#486834'; g.fillRect(0, 0, W, H); for (let i = 0; i < 3000; i++) { g.fillStyle = `hsl(${85 + Math.random() * 30},38%,${22 + Math.random() * 18}%)`; g.fillRect(Math.random() * W, Math.random() * H, 1.5, 3); } });
+  return tex(256, 256, (g, W, H) => {
+    g.fillStyle = '#3f5c2d'; g.fillRect(0, 0, W, H);
+    // Soft soil / dry grass patches
+    for (let i = 0; i < 40; i++) {
+      g.fillStyle = i % 2 ? 'rgba(82,102,48,0.28)' : 'rgba(42,64,28,0.28)';
+      g.beginPath(); g.arc(Math.random() * W, Math.random() * H, 10 + Math.random() * 22, 0, Math.PI * 2); g.fill();
+    }
+    for (let i = 0; i < 7500; i++) {
+      g.fillStyle = `hsl(${82 + Math.random() * 34}, ${32 + Math.random() * 18}%, ${18 + Math.random() * 20}%)`;
+      g.fillRect(Math.random() * W, Math.random() * H, 1.5, 3);
+    }
+  });
 }
 export function stopTextTexture() {
   return tex(256, 128, (g, W, H) => {

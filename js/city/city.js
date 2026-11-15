@@ -6,6 +6,7 @@ import { GeoBuf, stripQuad } from './geobuf.js';
 import { Colliders, Surfaces } from './physics.js';
 import * as TX from './textures.js';
 import { VERTICAL_SIGNS, BILLBOARDS } from './signs.js';
+import { getAsphaltPBR, getPavingPBR, getConcretePBR, getWaterNormal, injectPuddleShader } from './pbr.js';
 
 export const LAYOUT = (() => {
   const N = 9, P = 64, half = (N * P) / 2;
@@ -34,42 +35,72 @@ export class City {
   mats() {
     const night = (m, k = 1, base = 0) => { m.userData.nightK = k; m.userData.nightBase = base; this.nightMats.push(m); return m; };
     const M = {};
+    const aspPBR = getAsphaltPBR();
+    const pavPBR = getPavingPBR();
+    const conPBR = getConcretePBR();
+
     M.facade = {};
     TX.FACADE_TYPES.forEach((t, i) => {
       const tx = TX.facadeTextures(t, 11 + i);
-      M.facade[t] = night(new THREE.MeshStandardMaterial({ map: tx.map, emissiveMap: tx.emissive, emissive: '#ffffff', emissiveIntensity: 0, roughness: 0.82, metalness: t === 'office' ? 0.42 : 0.06 }), 0.6);
+      M.facade[t] = night(new THREE.MeshStandardMaterial({
+        map: tx.map,
+        emissiveMap: tx.emissive,
+        roughnessMap: tx.roughnessMap,
+        emissive: '#ffffff',
+        emissiveIntensity: 0,
+        roughness: 1.0,
+        metalness: t === 'office' ? 0.55 : 0.08,
+      }), 0.65);
     });
     const shop = TX.shopTextures(5);
-    M.shop = night(new THREE.MeshStandardMaterial({ map: shop.map, emissiveMap: shop.emissive, emissive: '#ffffff', emissiveIntensity: 0, roughness: 0.6 }), 0.65);
-    M.roof = new THREE.MeshStandardMaterial({ color: '#74787d', roughness: 0.92 });
-    M.roofProps = new THREE.MeshStandardMaterial({ color: '#b9bbbd', roughness: 0.7, metalness: 0.25 });
-    M.houseRoof = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.15 });
+    M.shop = night(new THREE.MeshStandardMaterial({ map: shop.map, emissiveMap: shop.emissive, emissive: '#ffffff', emissiveIntensity: 0, roughness: 0.55 }), 0.65);
+    M.roof = new THREE.MeshStandardMaterial({ color: '#74787d', normalMap: conPBR.normalMap, normalScale: new THREE.Vector2(0.4, 0.4), roughnessMap: conPBR.roughnessMap, roughness: 1.0 });
+    M.roofProps = new THREE.MeshStandardMaterial({ color: '#b9bbbd', roughness: 0.55, metalness: 0.35 });
+    M.houseRoof = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.15 });
     const ast = TX.asphaltTexture();
-    M.asphalt = new THREE.MeshStandardMaterial({ map: ast, roughness: 0.9 });
+    M.asphalt = injectPuddleShader(new THREE.MeshStandardMaterial({
+      map: ast,
+      normalMap: aspPBR.normalMap,
+      normalScale: new THREE.Vector2(0.65, 0.65),
+      roughnessMap: aspPBR.roughnessMap,
+      roughness: 1.0,
+    }), { maxPuddle: 0.9, rippleScale: 1.0 });
     const pav = TX.pavingTexture();
-    M.paving = new THREE.MeshStandardMaterial({ map: pav, roughness: 0.9 });
-    M.curb = new THREE.MeshStandardMaterial({ color: '#b5b1aa', roughness: 0.9 });
+    M.paving = injectPuddleShader(new THREE.MeshStandardMaterial({
+      map: pav,
+      normalMap: pavPBR.normalMap,
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      roughnessMap: pavPBR.roughnessMap,
+      roughness: 1.0,
+    }), { maxPuddle: 0.45, rippleScale: 1.2 });
+    M.curb = new THREE.MeshStandardMaterial({ color: '#b5b1aa', normalMap: conPBR.normalMap, normalScale: new THREE.Vector2(0.4, 0.4), roughness: 0.88 });
     const gr = TX.grassTexture();
-    M.grass = new THREE.MeshStandardMaterial({ map: gr, roughness: 1 });
-    M.lines = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.65, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-    M.stopText = new THREE.MeshStandardMaterial({ map: TX.stopTextTexture(), transparent: true, roughness: 0.7, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, depthWrite: false });
+    M.grass = new THREE.MeshStandardMaterial({ map: gr, roughness: 0.98 });
+    M.lines = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    M.stopText = new THREE.MeshStandardMaterial({ map: TX.stopTextTexture(), transparent: true, roughness: 0.65, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, depthWrite: false });
     M.vsign = night(new THREE.MeshStandardMaterial({ map: TX.verticalSignTexture(), emissiveMap: null, emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.45, side: THREE.DoubleSide }), 0.8, 0.05);
     M.vsign.emissiveMap = M.vsign.map;
-    M.konbini = night(new THREE.MeshStandardMaterial({ map: TX.konbiniTexture(false), emissiveMap: TX.konbiniTexture(true), emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.5 }), 0.85, 0.05);
-    M.station = night(new THREE.MeshStandardMaterial({ map: TX.stationTexture(false), emissiveMap: TX.stationTexture(true), emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.55 }), 0.7, 0.05);
-    M.vending = night(new THREE.MeshStandardMaterial({ map: TX.vendingTexture(false), emissiveMap: TX.vendingTexture(true), emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.4 }), 0.55, 0.05);
-    M.concrete = new THREE.MeshStandardMaterial({ color: '#9e9f9a', roughness: 0.88 });
-    M.deckTop = new THREE.MeshStandardMaterial({ map: ast, roughness: 0.88 });
-    M.pole = new THREE.MeshStandardMaterial({ color: '#9b9a95', roughness: 0.85 });
-    M.metal = new THREE.MeshStandardMaterial({ color: '#646a72', roughness: 0.45, metalness: 0.65 });
+    M.konbini = night(new THREE.MeshStandardMaterial({ map: TX.konbiniTexture(false), emissiveMap: TX.konbiniTexture(true), emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.48 }), 0.85, 0.05);
+    M.station = night(new THREE.MeshStandardMaterial({ map: TX.stationTexture(false), emissiveMap: TX.stationTexture(true), emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.5 }), 0.7, 0.05);
+    M.vending = night(new THREE.MeshStandardMaterial({ map: TX.vendingTexture(false), emissiveMap: TX.vendingTexture(true), emissive: '#ffffff', emissiveIntensity: 0.05, roughness: 0.38 }), 0.55, 0.05);
+    M.concrete = new THREE.MeshStandardMaterial({ color: '#9e9f9a', normalMap: conPBR.normalMap, normalScale: new THREE.Vector2(0.45, 0.45), roughnessMap: conPBR.roughnessMap, roughness: 1.0 });
+    M.deckTop = injectPuddleShader(new THREE.MeshStandardMaterial({
+      map: ast,
+      normalMap: aspPBR.normalMap,
+      normalScale: new THREE.Vector2(0.65, 0.65),
+      roughnessMap: aspPBR.roughnessMap,
+      roughness: 1.0,
+    }), { maxPuddle: 0.85, rippleScale: 1.0 });
+    M.pole = new THREE.MeshStandardMaterial({ color: '#9b9a95', normalMap: conPBR.normalMap, normalScale: new THREE.Vector2(0.3, 0.3), roughness: 0.82 });
+    M.metal = new THREE.MeshStandardMaterial({ color: '#646a72', roughness: 0.38, metalness: 0.72 });
     // Warm sodium-orange / LED street & highway lighting
     M.lamp = night(new THREE.MeshStandardMaterial({ color: '#fff3db', emissive: '#ffaa44', emissiveIntensity: 0.1 }), 2.5, 0.1);
     M.glow = new THREE.MeshBasicMaterial({ map: TX.glowTexture(), color: '#ffffff', transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
     M.wire = new THREE.LineBasicMaterial({ color: '#1d1d1f' });
-    M.trunk = new THREE.MeshStandardMaterial({ color: '#5a4434', roughness: 1 });
-    M.leaf = new THREE.MeshStandardMaterial({ color: '#3b6e32', roughness: 0.95 });
-    M.water = new THREE.MeshStandardMaterial({ color: '#1d4458', roughness: 0.15, metalness: 0.3 });
-    M.rail = new THREE.MeshStandardMaterial({ color: '#4b4d50', roughness: 0.5, metalness: 0.7 });
+    M.trunk = new THREE.MeshStandardMaterial({ color: '#4d392a', roughness: 0.95 });
+    M.leaf = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88 });
+    M.water = new THREE.MeshStandardMaterial({ color: '#14384a', normalMap: getWaterNormal(), normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.08, metalness: 0.42 });
+    M.rail = new THREE.MeshStandardMaterial({ color: '#4b4d50', roughness: 0.45, metalness: 0.75 });
     // BTS Skytrain livery: crisp white body + crimson/navy stripe
     M.train = new THREE.MeshStandardMaterial({ color: '#f1f5f9', roughness: 0.3, metalness: 0.4 });
     M.trainStripe = new THREE.MeshStandardMaterial({ color: '#e11d48', roughness: 0.35 });
@@ -957,8 +988,45 @@ export class City {
     make(pg, M.pole, I.pole, (it) => at(it[0], CURB, it[1], it[2]));
     make(new THREE.CylinderGeometry(0.28, 0.28, 0.9, 10).translate(0.35, 7.1, 0), M.metal, I.trans, (it) => at(it[0], CURB, it[1], 0));
     make(new THREE.BoxGeometry(1.0, 1.85, 0.8).translate(0, 0.92, 0), M.vending, I.vending, (it) => at(it[0], CURB, it[1], it[2]));
-    make(new THREE.CylinderGeometry(0.12, 0.18, 2.4, 6).translate(0, 1.2, 0), M.trunk, I.tree, (it) => at(it[0], CURB, it[1], 0, new THREE.Vector3(it[2], it[2], it[2])));
-    make(new THREE.IcosahedronGeometry(1.6, 0).translate(0, 3.4, 0), M.leaf, I.tree, (it) => at(it[0], CURB, it[1], it[0], new THREE.Vector3(it[2] * 1.2, it[2], it[2] * 1.2)));
+    make(new THREE.CylinderGeometry(0.11, 0.19, 2.5, 7).translate(0, 1.25, 0), M.trunk, I.tree, (it) => at(it[0], CURB, it[1], 0, new THREE.Vector3(it[2], it[2], it[2])));
+    // Multi-cluster organic foliage canopy with vertical AO vertex shading
+    const leafGeo = (() => {
+      const clusters = [
+        [0, 3.55, 0, 1.45],
+        [-0.75, 2.95, 0.45, 1.05],
+        [0.8, 3.05, -0.35, 1.1],
+        [0.15, 4.35, 0.15, 0.95],
+      ];
+      const pos = [], nrm = [], col = [], idx = [];
+      let vOff = 0;
+      const topC = new THREE.Color('#4f8f3b'), botC = new THREE.Color('#21421b'), tmp = new THREE.Color();
+      for (const [cx, cy, cz, rad] of clusters) {
+        const g = new THREE.IcosahedronGeometry(rad, 1);
+        g.translate(cx, cy, cz);
+        const p = g.attributes.position, n = g.attributes.normal;
+        for (let i = 0; i < p.count; i++) {
+          const y = p.getY(i);
+          pos.push(p.getX(i), y, p.getZ(i));
+          nrm.push(n.getX(i), n.getY(i), n.getZ(i));
+          const t = THREE.MathUtils.clamp((y - 2.0) / 3.2, 0, 1);
+          tmp.copy(botC).lerp(topC, t);
+          col.push(tmp.r, tmp.g, tmp.b);
+        }
+        if (g.index) {
+          for (let i = 0; i < g.index.count; i++) idx.push(g.index.getX(i) + vOff);
+        } else {
+          for (let i = 0; i < p.count; i++) idx.push(vOff + i);
+        }
+        vOff += p.count;
+      }
+      const out = new THREE.BufferGeometry();
+      out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      out.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+      out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      out.setIndex(idx);
+      return out;
+    })();
+    make(leafGeo, M.leaf, I.tree, (it) => at(it[0], CURB, it[1], it[0] * 1.7, new THREE.Vector3(it[2] * 1.15, it[2], it[2] * 1.15)));
     const tri = new THREE.Shape([new THREE.Vector2(-0.45, 0.4), new THREE.Vector2(0.45, 0.4), new THREE.Vector2(0, -0.38)]);
     const triGeo = new THREE.ExtrudeGeometry(tri, { depth: 0.03, bevelEnabled: false }).translate(0, 2.3, 0.05);
     make(triGeo, M.stopSign, I.stop, (it) => at(it[0], CURB, it[1], it[2]));
@@ -997,6 +1065,10 @@ export class City {
 
   update(dt, night) {
     this.time += dt;
+    if (this.M?.water?.normalMap) {
+      this.M.water.normalMap.offset.x = (this.time * 0.025) % 1;
+      this.M.water.normalMap.offset.y = (this.time * 0.014) % 1;
+    }
     const st = this.signalState(this.time);
     for (const [axis, s] of [[0, st.x], [1, st.z]]) {
       this.sigMats[axis + '-0'].emissiveIntensity = s === 'g' ? 3 : 0;

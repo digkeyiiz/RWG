@@ -25,42 +25,87 @@ export class Sky {
         float h2(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
         float vn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f*f*(3.0-2.0*f); return mix(mix(h2(i),h2(i+vec2(1,0)),f.x), mix(h2(i+vec2(0,1)),h2(i+vec2(1,1)),f.x), f.y); }
         float fbm(vec2 p){ float a = 0.5, s = 0.0; for(int k=0;k<5;k++){ s += a*vn(p); p = p*2.03+vec2(11.3,7.7); a *= 0.5; } return s; }
-        void main(){ float h = max(vDir.y, 0.0); vec3 c = mix(horizon, top, pow(h, 0.55));
-          if (vDir.y < 0.0) c = horizon * 0.8;
-          float s = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
-          c += sunCol * (pow(s, 600.0) * 2.5 + pow(s, 8.0) * 0.25) * (1.0 - night * 0.6);
-          if (vDir.y > 0.02) {
-            vec2 cp = vDir.xz / (vDir.y + 0.18) * 1.6 + vec2(time * 0.006, time * 0.002);
-            float d = smoothstep(0.55 - cover * 0.25, 0.85, fbm(cp));
-            float lit = 0.55 + 0.45 * smoothstep(0.35, 0.9, fbm(cp + normalize(sunDir.xz + 0.001) * 0.12));
-            vec3 cc = mix(horizon * 0.9, vec3(1.0), 0.65) * lit * (1.0 - night * 0.93) + sunCol * pow(s, 6.0) * 0.4 * (1.0 - night);
-            c = mix(c, cc, d * smoothstep(0.02, 0.22, vDir.y) * (1.0 - night * 0.55));
+        void main(){
+          vec3 dir = normalize(vDir);
+          float h = max(dir.y, 0.0);
+          vec3 c = mix(horizon, top, pow(h, 0.52));
+          // Atmospheric horizon haze & urban night skyglow
+          float horBand = exp(-h * 9.0);
+          c += vec3(0.12, 0.07, 0.04) * horBand * night * 0.85;
+          if (dir.y < 0.0) c = horizon * 0.72;
+          // Mie sun scattering & crisp solar disc
+          float s = max(dot(dir, normalize(sunDir)), 0.0);
+          float sunDisc = smoothstep(0.9993, 0.99985, s);
+          c += sunCol * (sunDisc * 4.5 + pow(s, 36.0) * 0.45 + pow(s, 5.0) * 0.22) * (1.0 - night * 0.72);
+          // Multi-layer FBM clouds with sun silver-lining
+          if (dir.y > 0.015) {
+            vec2 cp = dir.xz / (dir.y + 0.16) * 1.55 + vec2(time * 0.0055, time * 0.0018);
+            float n1 = fbm(cp);
+            float n2 = fbm(cp * 2.1 - vec2(time * 0.003, 0.0));
+            float d = smoothstep(0.53 - cover * 0.24, 0.84, n1 * 0.72 + n2 * 0.28);
+            float lit = 0.52 + 0.48 * smoothstep(0.32, 0.88, fbm(cp + normalize(sunDir.xz + 0.001) * 0.13));
+            vec3 cloudBase = mix(horizon * 0.85, vec3(1.0), 0.72) * lit * (1.0 - night * 0.92);
+            vec3 silver = sunCol * (pow(s, 7.0) * 0.65 + pow(s, 2.0) * 0.12) * (1.0 - night);
+            vec3 cc = cloudBase + silver;
+            float fade = smoothstep(0.015, 0.20, dir.y);
+            c = mix(c, cc, d * fade * (1.0 - night * 0.52));
           }
-          gl_FragColor = vec4(c, 1.0); }`,
+          gl_FragColor = vec4(c, 1.0);
+        }`,
     });
-    this.dome = new THREE.Mesh(new THREE.SphereGeometry(1500, 32, 16), mat);
+    this.dome = new THREE.Mesh(new THREE.SphereGeometry(1500, 36, 20), mat);
     this.dome.renderOrder = -10;
     // stars
-    const n = 1200, pos = new Float32Array(n * 3);
+    const n = 1400, pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { const u = Math.random(), v = Math.random() * 0.95; const th = u * Math.PI * 2, ph = Math.acos(1 - v); pos.set([Math.sin(ph) * Math.cos(th) * 1400, Math.cos(ph) * 1400, Math.sin(ph) * Math.sin(th) * 1400], i * 3); }
     const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     this.starMat = new THREE.PointsMaterial({ color: '#ffffff', size: 2, sizeAttenuation: false, transparent: true, opacity: 0, depthWrite: false, fog: false });
     this.stars = new THREE.Points(sg, this.starMat);
-    // distant mountain silhouettes: part of the backdrop (follow the camera, no fog, no lighting)
-    const mGeo = new THREE.ConeGeometry(1, 1, 7);
-    this.mountMat = new THREE.MeshBasicMaterial({ color: '#6f8294', fog: false });
-    const nm = 46, mtn = new THREE.InstancedMesh(mGeo, this.mountMat, nm), m4 = new THREE.Matrix4();
-    let seed = 7; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-    for (let k = 0; k < nm; k++) {
-      const a = (k / nm) * Math.PI * 2 + rnd() * 0.08, R = 1380 + rnd() * 60, h = 90 + rnd() * 230, w = 160 + rnd() * 200;
-      m4.compose(new THREE.Vector3(Math.cos(a) * R, h / 2 - 20, Math.sin(a) * R), new THREE.Quaternion(), new THREE.Vector3(w, h, w));
-      mtn.setMatrixAt(k, m4);
-    }
-    mtn.frustumCulled = false; mtn.renderOrder = -9;
-    this.mountains = mtn;
+
+    // Layered procedural mountain ridge silhouettes (replaces low-poly cones)
+    this.mountMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color('#6f8294') },
+        uHorizon: { value: new THREE.Color('#c7d6e6') },
+      },
+      vertexShader: `varying float vH; void main(){ vH = clamp((position.y + 10.0) / 190.0, 0.0, 1.0); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: `uniform vec3 uColor; uniform vec3 uHorizon; varying float vH;
+        void main(){ vec3 c = mix(uHorizon, uColor, smoothstep(0.0, 0.85, vH)); gl_FragColor = vec4(c, 1.0); }`,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    const makeRidge = (radius, baseH, amp, freq, seedOff) => {
+      const segs = 220;
+      const rPos = [], rIdx = [];
+      for (let i = 0; i <= segs; i++) {
+        const a = (i / segs) * Math.PI * 2;
+        const h = baseH
+          + Math.sin(a * freq + seedOff) * amp * 0.5
+          + Math.sin(a * freq * 2.3 + seedOff * 1.7) * amp * 0.28
+          + Math.cos(a * freq * 5.1 + seedOff * 2.9) * amp * 0.14
+          + Math.sin(a * freq * 11.0 + seedOff) * amp * 0.06;
+        const x = Math.cos(a) * radius, z = Math.sin(a) * radius;
+        rPos.push(x, -25, z, x, Math.max(8, h), z);
+        if (i < segs) {
+          const b = i * 2;
+          rIdx.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+        }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(rPos, 3));
+      g.setIndex(rIdx);
+      const m = new THREE.Mesh(g, this.mountMat);
+      m.frustumCulled = false; m.renderOrder = -9;
+      return m;
+    };
+    this.mountains = new THREE.Group();
+    this.mountains.add(
+      makeRidge(1410, 95, 115, 5, 0.8),
+      makeRidge(1320, 48, 65, 8, 2.4),
+    );
     this.fog = new THREE.Fog('#c7d6e6', 200, 1000);
     this.group = new THREE.Group();
-    this.group.add(this.dome, this.stars, mtn);
+    this.group.add(this.dome, this.stars, this.mountains);
     this.sunDir = new THREE.Vector3(0.5, 0.8, 0.3);
     this.night = 0;
   }
@@ -108,9 +153,10 @@ export class Sky {
     hemi.groundColor.set(night > 0.5 ? '#141418' : '#3a3833');
     this.fog.color.copy(fog); this.fog.near = (night > 0.5 ? 140 : 220) * farMul; this.fog.far = (night > 0.5 ? 700 : 1100) * farMul;
     this.scene.fog = this.fog;
-    this.mountMat.color.copy(hor).lerp(new THREE.Color(night > 0.5 ? '#05070d' : '#3e5163'), night > 0.5 ? 0.6 : 0.42);
+    this.mountMat.uniforms.uHorizon.value.copy(hor);
+    this.mountMat.uniforms.uColor.value.copy(hor).lerp(new THREE.Color(night > 0.5 ? '#05070d' : '#2d3f52'), night > 0.5 ? 0.65 : 0.48);
     this.scene.background = hor;
-    if ('environmentIntensity' in this.scene) this.scene.environmentIntensity = 0.06 + (1 - night) * 0.94;
+    if ('environmentIntensity' in this.scene) this.scene.environmentIntensity = 0.08 + (1 - night) * 0.92;
     renderer.toneMappingExposure = 1.0;
     return night;
   }

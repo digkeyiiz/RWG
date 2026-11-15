@@ -20,26 +20,36 @@ const GradeShader = {
       vec2 c = vUv - 0.5;
       float r2 = dot(c, c);
       // speed-based radial chromatic aberration (subtle)
-      float ca = 0.0007 + speed * 0.0022;
+      float ca = 0.0005 + speed * 0.0020;
       vec3 col;
       col.r = texture2D(tDiffuse, vUv + c * ca).r;
       col.g = texture2D(tDiffuse, vUv).g;
       col.b = texture2D(tDiffuse, vUv - c * ca).b;
+      // subtle local clarity / micro-contrast (makes asphalt grain & building edges pop)
+      vec2 px = vec2(1.0 / 1280.0, 1.0 / 720.0);
+      vec3 blur = (
+        texture2D(tDiffuse, vUv + vec2(px.x, 0.0)).rgb +
+        texture2D(tDiffuse, vUv - vec2(px.x, 0.0)).rgb +
+        texture2D(tDiffuse, vUv + vec2(0.0, px.y)).rgb +
+        texture2D(tDiffuse, vUv - vec2(0.0, px.y)).rgb
+      ) * 0.25;
+      col = mix(col, col + (col - blur) * 0.35, 0.55);
       // filmic S-curve contrast
-      col = mix(col, col * col * (3.0 - 2.0 * col), 0.35);
-      // saturation: slightly richer by day, desaturated in rain
+      col = mix(col, col * col * (3.0 - 2.0 * col), 0.32);
+      // saturation: slightly richer by day, moody in rain
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-      float sat = 1.08 - wet * 0.18 - night * 0.05;
+      float sat = 1.10 - wet * 0.14 - night * 0.04;
       col = mix(vec3(l), col, sat);
       // teal shadows / warm highlights (cinematic split tone), stronger at night
-      col += vec3(-0.012, 0.004, 0.02) * (1.0 - l) * (0.6 + night);
+      col += vec3(-0.010, 0.004, 0.022) * (1.0 - l) * (0.55 + night);
+      col += vec3(0.015, 0.008, -0.006) * l * (1.0 - night * 0.5);
       col *= tint;
       // vignette (stronger with speed)
-      float vig = smoothstep(0.85, 0.15, r2 * (1.6 + speed * 0.8));
-      col *= mix(0.72, 1.0, vig);
-      // film grain
+      float vig = smoothstep(0.88, 0.16, r2 * (1.5 + speed * 0.85));
+      col *= mix(0.74, 1.0, vig);
+      // fine film grain
       float g = hash(vUv * vec2(1920.0, 1080.0) + fract(time) * 100.0) - 0.5;
-      col += g * (0.022 + night * 0.012);
+      col += g * (0.016 + night * 0.010);
       gl_FragColor = vec4(max(col, 0.0), 1.0);
     }`,
 };

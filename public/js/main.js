@@ -301,7 +301,7 @@ async function ensureCity() {
   const composer = new EffectComposer(renderer);
   composer.setPixelRatio(renderer.getPixelRatio());
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.6, 0.45, 0.85);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.45, 0.42, 0.88);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   const grade = makeGradePass();

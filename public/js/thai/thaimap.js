@@ -266,26 +266,47 @@ export class ThaiMap {
 
   _makeMaterials() {
     const poly = { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 };
-    this.concreteMat = new THREE.MeshStandardMaterial({ color: 0x9a9a96, roughness: 0.95, side: THREE.DoubleSide });
-    this.coarseMat = new THREE.MeshStandardMaterial({ color: 0x35353a, emissive: 0x161b24, emissiveIntensity: 0, roughness: 0.95, ...poly });
-    this.waterMat = new THREE.MeshStandardMaterial({ color: 0x2f6f9a, emissive: 0x0b2538, emissiveIntensity: 0, roughness: 0.25, metalness: 0.1, ...poly });
+    const conPBR = getConcretePBR();
+    this.concreteMat = new THREE.MeshStandardMaterial({
+      color: 0x9a9a96,
+      normalMap: conPBR.normalMap,
+      normalScale: new THREE.Vector2(0.45, 0.45),
+      roughnessMap: conPBR.roughnessMap,
+      roughness: 1.0,
+      side: THREE.DoubleSide,
+    });
+    this.coarseMat = new THREE.MeshStandardMaterial({ color: 0x35353a, emissive: 0x161b24, emissiveIntensity: 0, roughness: 0.92, ...poly });
+    this.waterMat = new THREE.MeshStandardMaterial({
+      color: 0x17445e,
+      emissive: 0x061824,
+      emissiveIntensity: 0,
+      normalMap: getWaterNormal(),
+      normalScale: new THREE.Vector2(0.45, 0.45),
+      roughness: 0.08,
+      metalness: 0.42,
+      ...poly,
+    });
     const tex = windowTextures();
     this.winTex = tex;
     this.bldMat = new THREE.MeshStandardMaterial({
       map: tex.map, emissiveMap: tex.emissive, emissive: 0xffffff, emissiveIntensity: 0,
-      vertexColors: true, roughness: 0.85, metalness: 0.05,
+      vertexColors: true, roughness: 0.72, metalness: 0.16,
     });
-    this.groundMat = new THREE.MeshStandardMaterial({ color: 0x5f6a55, roughness: 1 });
+    const gr = grassTexture();
+    gr.repeat.set(2400, 2400);
+    this.groundMat = new THREE.MeshStandardMaterial({ map: gr, color: 0xaab59c, roughness: 0.98 });
   }
   _roadMat(key) {
     let m = this.roadMats.get(key);
     if (!m) {
       const tex = makeRoadTexture(key, this.q.aniso);
-      m = new THREE.MeshStandardMaterial({
+      const aspPBR = getAsphaltPBR();
+      m = injectPuddleShader(new THREE.MeshStandardMaterial({
         map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: this.night * 0.22,
-        roughness: 0.92, metalness: 0,
+        normalMap: aspPBR.normalMap, normalScale: new THREE.Vector2(0.55, 0.55),
+        roughnessMap: aspPBR.roughnessMap, roughness: 1.0, metalness: 0,
         polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
-      });
+      }), { maxPuddle: 0.85, rippleScale: 1.0 });
       this.roadMats.set(key, m);
     }
     return m;
