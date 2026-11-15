@@ -4,6 +4,8 @@
 // Coordinates: x east, z south (metres), origin lat0=13.7580 lon0=100.5650.
 import * as THREE from 'three';
 import { Surfaces } from '../city/physics.js';
+import { getAsphaltPBR, getConcretePBR, getWaterNormal, injectPuddleShader } from '../city/pbr.js';
+import { grassTexture } from '../city/textures.js';
 import { WorldProps } from './worldprops.js';
 import {
   Geo, addRoadRibbon, roadTexKey, makeRoadTexture, roadWidth, laneCount, roadY,
