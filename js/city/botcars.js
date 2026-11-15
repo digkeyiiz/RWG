@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { GENERATIONS } from '../catalog.js';
+import { GENERATIONS, EXTRA_COLORS, WHEEL_STYLES, WHEEL_FINISHES, DEFAULT_BUILD } from '../catalog.js';
+import { loadTemplate, getReadyTemplate } from '../glbcar.js';
 
 export const BOT_GENS = GENERATIONS.filter((g) => g.glb);
 const protos = new Map(); // gen id -> proto
@@ -51,6 +52,75 @@ const aeroGeos = {
   frontLip: new THREE.BoxGeometry(0.16, 0.055, 1.68),
   underglow: new THREE.PlaneGeometry(3.1, 1.35).rotateX(-Math.PI / 2),
 };
+
+let fullLoading = null;
+const fullReadySet = new Set();
+
+export function readyFullGens() {
+  for (const g of BOT_GENS) if (getReadyTemplate(g.glb)) fullReadySet.add(g.id);
+  return BOT_GENS.filter((g) => fullReadySet.has(g.id));
+}
+
+export function preloadFullCarModels(first = null) {
+  if (fullLoading) return fullLoading;
+  const order = [...BOT_GENS].sort((a, b) => (b.id === first) - (a.id === first));
+  const wheels = WHEEL_STYLES.filter((w) => w.glb);
+  fullLoading = (async () => {
+    for (const g of order) {
+      if (!getReadyTemplate(g.glb)) {
+        try { await loadTemplate(g.glb, g.glbConfig || {}); } catch (e) { console.warn('full bot glb failed', g.id, e); }
+      }
+      fullReadySet.add(g.id);
+      await new Promise((r) => setTimeout(r, 30));
+    }
+    for (const w of wheels) {
+      if (!getReadyTemplate(w.glb)) {
+        try { await loadTemplate(w.glb, w.glbConfig || {}); } catch {}
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    return readyFullGens();
+  })();
+  return fullLoading;
+}
+
+const WHEEL_POOL = WHEEL_STYLES.filter((w) => w.id !== 'cover').map((w) => w.id);
+const FINISH_POOL = WHEEL_FINISHES.filter((f) => f.id !== 'custom').map((f) => f.id);
+const PAINT_FIN = ['gloss', 'metallic', 'pearl', 'satin', 'matte'];
+const SPOILERS = ['none', 'none', 'lip', 'ducktail', 'wing', 'gtwing'];
+const FRONTS = ['oem', 'lip', 'splitter', 'full'];
+const EXHAUSTS = ['oem', 'single', 'dual', 'ti'];
+const THAI_PRE = ['กข', 'กท', 'ขค', 'งจ', 'ชล', 'ฎฐ', 'ณด', 'ตถ', 'นบ', 'ปผ', 'พร', 'ภม', 'รย', 'วศ', 'สอ', 'ฮฮ'];
+
+export function randomCarBuild(rand = Math.random, genPool = null) {
+  const pool = genPool && genPool.length ? genPool : readyFullGens();
+  const gen = pool.length ? pool[Math.floor(rand() * pool.length)] : BOT_GENS[0];
+  const pick = (a) => a[Math.floor(rand() * a.length)];
+  const b = JSON.parse(JSON.stringify(DEFAULT_BUILD));
+  b.gen = gen.id;
+  b.paint.color = pick(EXTRA_COLORS);
+  b.paint.finish = pick(PAINT_FIN);
+  b.paint.hood = rand() < 0.18 ? 'carbon' : 'body';
+  b.paint.roof = rand() < 0.22 ? 'black' : 'body';
+  b.wheels.style = pick(WHEEL_POOL);
+  b.wheels.finish = pick(FINISH_POOL);
+  b.wheels.rim = 16 + Math.floor(rand() * 3);
+  b.wheels.camber = rand() < 0.35 ? -(1 + Math.floor(rand() * 3)) : 0;
+  b.wheels.caliper = pick(['#b91c1c', '#eab308', '#0284c7', '#16a34a', '#3a3a3a']);
+  b.kit.front = pick(FRONTS);
+  b.kit.side = rand() < 0.55 ? 'skirt' : 'none';
+  b.kit.rear = rand() < 0.5 ? (rand() < 0.5 ? 'diffuser' : 'lip') : 'none';
+  b.kit.spoiler = pick(SPOILERS);
+  b.kit.exhaust = pick(EXHAUSTS);
+  b.kit.partColor = rand() < 0.5 ? 'carbon' : rand() < 0.5 ? 'black' : 'body';
+  b.suspension.drop = rand() < 0.65 ? Math.floor(rand() * 26) : 0;
+  b.suspension.dropRear = b.suspension.drop;
+  b.lights.underglow = rand() < 0.2 ? 'solid' : 'none';
+  b.lights.underglowColor = pick(BOT_NEONS);
+  b.glass.side = pick([40, 60, 80]);
+  b.plate.line1 = `${pick(THAI_PRE)} ${1000 + Math.floor(rand() * 8999)}`;
+  return b;
+}
 
 export function randomBotCustom(rand = Math.random) {
   return {

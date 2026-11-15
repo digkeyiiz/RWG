@@ -459,7 +459,7 @@ async function switchCityMap(w) {
       const res = await tm.load('data/', REAL_CFG[w]);
       if (!res.local && !res.country) { ld.classList.add('hide'); toast('ยังไม่มีข้อมูลแผนที่นี้'); return; }
       realMaps[w] = tm;
-      if (gfx.get('bots') === 'real') loadBots();
+      if (gfx.get('bots') === 'real') { loadBots(); C.BOTS.preloadFullCarModels(build.gen); }
       ld.classList.add('hide');
     }
   }
