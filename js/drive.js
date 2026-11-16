@@ -143,7 +143,7 @@ export class Driver {
       if (this._prevGas && !inp.gas && this.rpm > 4200 && (exSnd === 'popbang' || (exSnd === 'titanium' && Math.random() < 0.5))) {
         this.onBackfire?.(1.2);
         this.playPop(exSnd === 'popbang');
-        if (pf.turbo > 0) this.playBov();
+        if ((pf.boost || pf.turbo || 0) > 0 || pf.hasTurbo) this.playBov();
       }
       this._prevGas = !!inp.gas;
       this.burnout = !!(inp.gas && (inp.hand || (inp.brake && vf > -0.5)) && speed < 12);
@@ -402,7 +402,7 @@ export class Driver {
     filter.frequency.setTargetAtTime(bright + this.rpm * 0.28 + (throttle ? 440 : 0), ctx.currentTime, 0.05);
     gain.gain.setTargetAtTime(loud * (throttle ? 1 : 0.55), ctx.currentTime, 0.08);
     // turbo spool
-    const hasTurbo = (this.perf?.turbo || 0) > 0;
+    const hasTurbo = (this.perf?.boost || this.perf?.turbo || 0) > 0 || !!this.perf?.hasTurbo;
     const spool = hasTurbo && throttle ? Math.max(0, (this.rpm - 2400) / 5000) : 0;
     turboOsc.frequency.setTargetAtTime(2100 + spool * 2300, ctx.currentTime, 0.08);
     turboGain.gain.setTargetAtTime(spool * 0.018, ctx.currentTime, 0.08);
@@ -471,6 +471,90 @@ export class Driver {
         g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.24);
         o.connect(f); f.connect(g); g.connect(ctx.destination);
         o.start(); o.stop(ctx.currentTime + 0.25);
+      }
+    } catch {}
+  }
+  playSampleRev(perf, exhaustSound = 'sport', vol = 0.85) {
+    try {
+      const ctx = this.audio?.ctx || this._hornCtx || (this._hornCtx = new (window.AudioContext || window.webkitAudioContext)());
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const v = Math.max(0.05, Math.min(1.2, Number(vol) || 0.85));
+      const fire = perf ? (perf.rotary ? 2 : (perf.cyl || 4) / 2) : 2;
+      const redline = Math.min(11500, Math.max(5500, perf?.redline || 7000));
+      const fIdle = (950 / 60) * fire;
+      const fPeak = ((redline * 0.94) / 60) * fire;
+      const fBounce = ((redline * 0.88) / 60) * fire;
+      const fEnd = (1050 / 60) * fire;
+      const t0 = ctx.currentTime;
+
+      const osc1 = ctx.createOscillator(); osc1.type = 'sawtooth';
+      const osc2 = ctx.createOscillator(); osc2.type = 'square';
+      const setCurve = (param, mult) => {
+        param.setValueAtTime(fIdle * mult, t0);
+        param.linearRampToValueAtTime(Math.max(12, fIdle * mult * 1.45), t0 + 0.05);
+        param.exponentialRampToValueAtTime(Math.max(20, fPeak * mult), t0 + 0.45);
+        param.linearRampToValueAtTime(Math.max(20, fBounce * mult), t0 + 0.54);
+        param.exponentialRampToValueAtTime(Math.max(20, fPeak * mult * 1.01), t0 + 0.68);
+        param.exponentialRampToValueAtTime(Math.max(15, fEnd * mult), t0 + 1.2);
+      };
+      setCurve(osc1.frequency, 1);
+      setCurve(osc2.frequency, 0.5);
+
+      const bright = exhaustSound === 'titanium' || exhaustSound === 'popbang' ? 1650 : exhaustSound === 'sport' ? 1150 : 760;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = exhaustSound === 'titanium' || exhaustSound === 'popbang' ? 5 : 3.5;
+      filter.frequency.setValueAtTime(360, t0);
+      filter.frequency.exponentialRampToValueAtTime(bright + redline * 0.16, t0 + 0.48);
+      filter.frequency.exponentialRampToValueAtTime(bright + redline * 0.15, t0 + 0.68);
+      filter.frequency.exponentialRampToValueAtTime(420, t0 + 1.2);
+
+      const baseLoud = exhaustSound === 'stock' ? 0.08 : exhaustSound === 'sport' ? 0.13 : 0.17;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.001, t0);
+      gain.gain.linearRampToValueAtTime(baseLoud * v, t0 + 0.06);
+      gain.gain.setValueAtTime(baseLoud * v, t0 + 0.66);
+      gain.gain.exponentialRampToValueAtTime(0.0005, t0 + 1.22);
+
+      osc1.connect(filter); osc2.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+      osc1.start(t0); osc2.start(t0);
+      osc1.stop(t0 + 1.25); osc2.stop(t0 + 1.25);
+
+      const hasTurbo = (perf?.boost || perf?.turbo || 0) > 0 || !!perf?.hasTurbo;
+      if (hasTurbo) {
+        const to = ctx.createOscillator(), tg = ctx.createGain();
+        to.type = 'sine';
+        to.frequency.setValueAtTime(1950, t0 + 0.1);
+        to.frequency.exponentialRampToValueAtTime(4300, t0 + 0.64);
+        tg.gain.setValueAtTime(0.0001, t0 + 0.1);
+        tg.gain.linearRampToValueAtTime(0.024 * v, t0 + 0.42);
+        tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.72);
+        to.connect(tg); tg.connect(ctx.destination);
+        to.start(t0 + 0.1); to.stop(t0 + 0.74);
+
+        const len = Math.floor(ctx.sampleRate * 0.24);
+        const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2650; bp.Q.value = 3;
+        const bg = ctx.createGain(); bg.gain.value = 0.075 * v;
+        src.connect(bp); bp.connect(bg); bg.connect(ctx.destination);
+        src.start(t0 + 0.68);
+      }
+
+      if (exhaustSound === 'popbang' || exhaustSound === 'titanium') {
+        const pops = exhaustSound === 'popbang' ? [0.71, 0.83, 0.96] : [0.73, 0.86];
+        for (const delay of pops) {
+          const po = ctx.createOscillator(), pg = ctx.createGain();
+          po.type = 'sawtooth';
+          po.frequency.setValueAtTime(155, t0 + delay);
+          po.frequency.exponentialRampToValueAtTime(42, t0 + delay + 0.09);
+          pg.gain.setValueAtTime(0.15 * v, t0 + delay);
+          pg.gain.exponentialRampToValueAtTime(0.0005, t0 + delay + 0.1);
+          po.connect(pg); pg.connect(ctx.destination);
+          po.start(t0 + delay); po.stop(t0 + delay + 0.11);
+        }
       }
     } catch {}
   }

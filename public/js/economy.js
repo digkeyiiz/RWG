@@ -48,7 +48,12 @@ export function buildKeys(build) {
 }
 
 // ---------------- rewards ----------------
-export const TRACKS = { touge: { len: 3453, prize: 9000 }, city: { len: 2255, prize: 6000 }, ring: { len: 2537, prize: 6000 } };
+export const TRACKS = {
+  touge: { len: 3453, prize: 9000 },
+  city: { len: 2255, prize: 6000 },
+  ring: { len: 2537, prize: 6000 },
+  sprint: { len: 747, prize: 4500 },
+};
 // prize for finishing position `pos` (0 = winner) among `racers` real players; solo races vs bots pay less
 export function racePrize(track, laps, pos, racers, bots) {
   const T = TRACKS[track];

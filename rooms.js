@@ -15,6 +15,35 @@ const LOBBY_MS = 20000, COUNTDOWN_MS = 4500;
 const log = (...a) => console.log(new Date().toISOString(), '[world]', ...a);
 const eco = import('./public/js/economy.js');
 const plc = import('./public/js/places.js');
+const eng = import('./public/js/engine.js');
+
+async function compactSpec(build) {
+  try {
+    const G = await eng;
+    const s = G.carShowcaseSummary(build);
+    return {
+      carName: s.carName,
+      gen: s.gen,
+      engineId: s.engineId,
+      engineName: s.engineName,
+      cc: s.cc,
+      liters: s.liters,
+      cyl: s.cyl,
+      rotary: s.rotary,
+      hasTurbo: s.hasTurbo,
+      boost: s.boost,
+      hp: s.hp,
+      tq: s.tq,
+      mass: s.mass,
+      drive: s.drive,
+      pi: s.pi,
+      cls: s.cls,
+      color: s.color,
+      paintColor: s.paintColor,
+      exhaustSound: s.exhaustSound,
+    };
+  } catch { return null; }
+}
 
 function cleanName(n) {
   const s = String(n ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 16);
@@ -84,8 +113,29 @@ function attachRooms(httpServer) {
     }
     return null;
   }
-  const pubPlayer = (p) => ({ id: p.id, name: p.name, crew: p.prof.crew || null, username: p.prof.username || null, build: p.build, rep: p.prof.rep, likes: p.prof.likes || 0, stuntBest: p.prof.stuntBest || 0, inGarage: !!p.garage, s: p.lastS || null });
-  const lobbyList = (w) => [...w.lobbies.values()].map((l) => ({ id: l.id, track: l.track, laps: l.laps, host: l.hostName, hostId: l.host, ids: [...l.members], members: [...l.members].map((sid) => w.players.get(sid)?.name).filter(Boolean), startsIn: Math.max(0, l.t - Date.now()) }));
+  const pubPlayer = (p) => ({
+    id: p.id, name: p.name, crew: p.prof.crew || null, username: p.prof.username || null,
+    build: p.build, rep: p.prof.rep || 0, likes: p.prof.likes || 0,
+    wins: p.prof.wins || 0, races: p.prof.races || 0,
+    stuntBest: p.prof.stuntBest || 0, stuntTotal: p.prof.stuntTotal || 0,
+    bounty: p.prof.bounty || 0, best: p.prof.best || {},
+    inGarage: !!p.garage, inRace: !!p.raceId, s: p.lastS || null,
+  });
+  const emitPeerSync = (w, p) => {
+    if (!w || !p) return;
+    io.to(w.id).emit('peer:sync', {
+      id: p.id, rep: p.prof.rep || 0, likes: p.prof.likes || 0,
+      wins: p.prof.wins || 0, races: p.prof.races || 0,
+      stuntBest: p.prof.stuntBest || 0, stuntTotal: p.prof.stuntTotal || 0,
+      best: p.prof.best || {}, inGarage: !!p.garage, inRace: !!p.raceId,
+    });
+  };
+  const lobbyList = (w) => [...w.lobbies.values()].map((l) => ({
+    id: l.id, track: l.track, laps: l.laps, host: l.hostName, hostId: l.host,
+    hostSpec: l.hostSpec || null, toId: l.to || null, toName: l.toName || null,
+    ids: [...l.members], members: [...l.members].map((sid) => w.players.get(sid)?.name).filter(Boolean),
+    startsIn: Math.max(0, l.t - Date.now()),
+  }));
   const me = (p) => ({ username: p.prof.username || null, crew: p.prof.crew || null, likes: p.prof.likes || 0, friends: (p.prof.friends || []).map(uname).filter(Boolean), requests: (p.prof.freq || []).map(uname).filter(Boolean), money: p.prof.money, rep: p.prof.rep, owned: p.prof.owned, discovered: p.prof.discovered, races: p.prof.races, wins: p.prof.wins, best: p.prof.best, stuntBest: p.prof.stuntBest || 0, stuntTotal: p.prof.stuntTotal || 0, name: p.prof.name, bounty: p.prof.bounty || 0, escapes: p.prof.escapes || 0, busted: p.prof.busted || 0 });
 
   // remove anything a build uses that this player doesn't own (others see what you really own)
@@ -108,16 +158,23 @@ function attachRooms(httpServer) {
   }
 
   // ---------------- races
-  function startRace(w, lobby) {
+  async function startRace(w, lobby) {
+    if (!w.lobbies.has(lobby.id)) return;
     w.lobbies.delete(lobby.id);
     const members = [...lobby.members].filter((sid) => w.players.has(sid));
     if (!members.length) return;
-    const race = { id: lobby.id, track: lobby.track, laps: lobby.laps, bots: lobby.bots, diff: lobby.diff ?? 0, members, t0: Date.now() + COUNTDOWN_MS, prog: new Map(), fin: [], seed: Math.floor(Math.random() * 1e9) };
+    const specs = {};
+    await Promise.all(members.map(async (sid) => {
+      const pl = w.players.get(sid);
+      if (pl) specs[sid] = await compactSpec(pl.build);
+    }));
+    const race = { id: lobby.id, track: lobby.track, laps: lobby.laps, bots: lobby.bots, diff: lobby.diff ?? 0, members, specs, t0: Date.now() + COUNTDOWN_MS, prog: new Map(), fin: [], seed: Math.floor(Math.random() * 1e9) };
     w.races.set(race.id, race);
     const host = w.players.get(lobby.host);
     for (const sid of members) {
       const p = w.players.get(sid); p.raceId = race.id;
-      io.to(sid).emit('race:start', { raceId: race.id, cfg: { track: race.track, laps: race.laps, bots: race.bots, diff: race.diff, traffic: false, seed: race.seed }, grid: members, inMs: COUNTDOWN_MS, by: host?.name || '' });
+      emitPeerSync(w, p);
+      io.to(sid).emit('race:start', { raceId: race.id, cfg: { track: race.track, laps: race.laps, bots: race.bots, diff: race.diff, traffic: false, seed: race.seed }, grid: members, specs, inMs: COUNTDOWN_MS, by: host?.name || '' });
     }
     io.to(w.id).emit('race:lobbies', lobbyList(w));
     log('race start', w.id, race.track, `laps=${race.laps}`, `players=${members.length}`, `bots=${race.bots}`);
@@ -126,7 +183,10 @@ function attachRooms(httpServer) {
   function endRace(w, id) {
     const r = w.races.get(id);
     if (!r) return;
-    for (const sid of r.members) { const p = w.players.get(sid); if (p && p.raceId === id) p.raceId = null; }
+    for (const sid of r.members) {
+      const p = w.players.get(sid);
+      if (p && p.raceId === id) { p.raceId = null; emitPeerSync(w, p); }
+    }
     w.races.delete(id);
   }
   // the race is over once everyone still in it has a finish on record
@@ -135,6 +195,7 @@ function attachRooms(httpServer) {
   function quitRace(w, p, sid) {
     const r = p.raceId && w.races.get(p.raceId);
     p.raceId = null;
+    if (w.players.has(sid)) emitPeerSync(w, p);
     if (!r) return;
     if (!r.fin.some((f) => f.sid === sid)) r.members = r.members.filter((x) => x !== sid);
     raceDone(w, r);
@@ -256,7 +317,7 @@ function attachRooms(httpServer) {
     });
     sock.on('car:act', (d = {}) => {
       if (!w || raceBudget-- <= 0) return;
-      const kind = d.kind === 'horn' || d.kind === 'flash' ? d.kind : null;
+      const kind = d.kind === 'horn' || d.kind === 'flash' || d.kind === 'rev' ? d.kind : null;
       if (kind) sock.to(w.id).emit('car:act', { id: sock.id, kind, name: p.name });
     });
 
@@ -286,12 +347,13 @@ function attachRooms(httpServer) {
       if (d.id === null) {
         p.garage = null;
         if (p.lastS) { p.lastS = [...p.lastS]; p.lastS[9] = 1; }
+        emitPeerSync(w, p);
         return cb({ ok: true });
       }
       const markInGarage = () => {
         if (p.lastS) { p.lastS = [...p.lastS]; p.lastS[9] = 0; sock.to(w.id).emit('st', { id: sock.id, s: p.lastS }); }
       };
-      if (d.id === 'showroom') { p.garage = 'showroom'; markInGarage(); return cb({ ok: true, bonus: 0, me: me(p) }); }
+      if (d.id === 'showroom') { p.garage = 'showroom'; markInGarage(); emitPeerSync(w, p); return cb({ ok: true, bonus: 0, me: me(p) }); }
       const g = P.garageById(d.id);
       if (!g) return cb({ ok: false });
       if (!p.pose || Date.now() - p.pose.t > 3000 || Math.hypot(p.pose.x - g.x, p.pose.z - g.z) > (g.onTouge ? 30 : 22)) return cb({ ok: false, err: 'ไม่ได้อยู่ที่อู่' });
@@ -299,6 +361,7 @@ function attachRooms(httpServer) {
       markInGarage();
       let bonus = 0;
       if (g.hidden && !p.prof.discovered.includes(g.id)) { p.prof.discovered.push(g.id); bonus = E.GARAGE_DISCOVERY; credit(p, bonus, 'discover', { g: g.id }); }
+      emitPeerSync(w, p);
       cb({ ok: true, bonus, me: me(p) });
     });
     sock.on('buy', async (d = {}, cb) => {
@@ -340,17 +403,19 @@ function attachRooms(httpServer) {
       const laps = Number.isInteger(d.laps) && d.laps >= 1 && d.laps <= 5 ? d.laps : 1;
       const bots = Number.isInteger(d.bots) && d.bots >= 0 && d.bots <= 5 ? d.bots : 3;
       const diff = Number.isInteger(d.diff) && d.diff >= 0 && d.diff <= 3 ? d.diff : 0;
-      const l = { id: nid('r'), host: sock.id, hostName: p.name, track, laps, bots, diff, members: new Set([sock.id]), t: Date.now() + (d.now ? 0 : LOBBY_MS) };
+      const to = typeof d.to === 'string' && d.to !== sock.id && w.players.has(d.to) ? d.to : null;
+      const toName = to ? (w.players.get(to)?.name || null) : null;
+      const hostSpec = await compactSpec(p.build);
+      const l = { id: nid('r'), host: sock.id, hostName: p.name, hostSpec, track, laps, bots, diff, to, toName, members: new Set([sock.id]), t: Date.now() + (d.now && !to ? 0 : LOBBY_MS) };
       const pt = d.party && partyOf(p.key);
       if (pt) {
         for (const k of pt.members) { const q = presence.get(k); if (q && q.w === w && !q.raceId) { l.members.add(q.id); if (q !== p) io.to(q.id).emit('race:party', { host: p.name, track, laps }); } }
-        l.t = Date.now() + 8000;
+        l.t = Math.max(l.t, Date.now() + 8000);
       }
+      if (to) l.t = Math.max(l.t, Date.now() + LOBBY_MS); // a challenge always waits for the answer
       w.lobbies.set(l.id, l);
       io.to(w.id).emit('race:lobbies', lobbyList(w));
-      const to = typeof d.to === 'string' && w.players.has(d.to) ? d.to : null;
-      if (!d.now || to) sock.to(w.id).emit('race:invite', { id: l.id, host: p.name, track, laps, to });
-      if (to) l.t = Math.max(l.t, Date.now() + LOBBY_MS); // a challenge always waits for the answer
+      if (!d.now || to) sock.to(w.id).emit('race:invite', { id: l.id, host: p.name, hostId: sock.id, track, laps, bots, to, toName, hostSpec });
       cb({ ok: true, id: l.id });
     });
     sock.on('race:join', (d = {}, cb) => {
@@ -361,8 +426,25 @@ function attachRooms(httpServer) {
       if (l.members.size >= 8) return cb({ ok: false, err: 'ผู้แข่งเต็มแล้ว' });
       for (const o of w.lobbies.values()) o.members.delete(sock.id);
       l.members.add(sock.id);
+      if (l.to && l.to === sock.id && l.members.size === 2) {
+        l.t = Math.min(l.t, Date.now() + 2500);
+        const inMs = Math.max(0, l.t - Date.now());
+        for (const sid of l.members) io.to(sid).emit('race:accepted', { id: l.id, by: p.name, inMs });
+      }
       io.to(w.id).emit('race:lobbies', lobbyList(w));
       cb({ ok: true });
+    });
+    sock.on('race:decline', (d = {}, cb) => {
+      if (!w) return cb?.({ ok: false });
+      const l = w.lobbies.get(d.id);
+      if (!l) return cb?.({ ok: false, err: 'คำท้าหมดอายุแล้ว' });
+      if (l.to === sock.id) {
+        io.to(l.host).emit('race:declined', { id: l.id, by: p.name, track: l.track });
+        if (l.members.size <= 1) w.lobbies.delete(l.id);
+        else { l.to = null; l.toName = null; }
+        io.to(w.id).emit('race:lobbies', lobbyList(w));
+      }
+      cb?.({ ok: true });
     });
     sock.on('race:leave', () => {
       if (!w) return;
@@ -413,9 +495,10 @@ function attachRooms(httpServer) {
       if (!(p.prof.best[bestKey] <= t)) p.prof.best[bestKey] = Math.round(t * 100) / 100;
       credit(p, prize, 'race', { track: r.track, pos, racers, time: t });
       log('race fin', p.name, r.track, `pos=${pos + 1}/${racers}`, `t=${t.toFixed(2)}`, `prize=${prize}`);
-      for (const sid of r.members) io.to(sid).emit('race:result', { id: sock.id, name: p.name, t, pos, prize });
-      cb({ ok: true, prize, rep, pos, me: me(p) });
+      for (const sid of r.members) io.to(sid).emit('race:result', { id: sock.id, name: p.name, crew: p.prof.crew || null, spec: r.specs?.[sock.id] || null, t, pos, prize });
       p.raceId = null; // finished: free to race again while the others are still driving
+      emitPeerSync(w, p);
+      cb({ ok: true, prize, rep, pos, me: me(p) });
       raceDone(w, r);
     });
 
@@ -508,8 +591,39 @@ function attachRooms(httpServer) {
     const needAccount = (cb) => { if (!p?.prof.username) { cb({ ok: false, err: 'สมัครชื่อผู้ใช้ก่อน (เมนูเพื่อน → บัญชี)' }); return true; } return false; };
     sock.on('friend:list', (d, cb) => {
       if (typeof cb !== 'function' || noPlayer(cb)) return;
-      const list = (p.prof.friends || []).map((k) => { const pr = store.byKey(k), q = presence.get(k); return pr && { username: pr.username, name: pr.name, online: !!q, same: q?.w === w, racing: !!q?.raceId, rep: pr.rep, car: q?.build?.gen || null }; }).filter(Boolean);
+      const list = (p.prof.friends || []).map((k) => {
+        const pr = store.byKey(k), q = presence.get(k);
+        return pr && {
+          username: pr.username, name: pr.name, online: !!q, same: q?.w === w, racing: !!q?.raceId,
+          id: q?.id || null, build: q?.build || null,
+          rep: pr.rep || 0, wins: pr.wins || 0, races: pr.races || 0, likes: pr.likes || 0, stuntBest: pr.stuntBest || 0,
+          car: q?.build?.gen || null,
+        };
+      }).filter(Boolean);
       cb({ ok: true, friends: list, requests: (p.prof.freq || []).map((k) => ({ username: uname(k), name: store.byKey(k)?.name })).filter((x) => x.username), party: partyOf(p.key) ? partyInfo(partyOf(p.key)) : null });
+    });
+    sock.on('peer:profile', (d = {}, cb) => {
+      if (!w || typeof cb !== 'function') return;
+      let t = d.id ? w.players.get(d.id) : null;
+      if (!t && d.id) {
+        for (const wr of worlds.values()) { if (wr.players.has(d.id)) { t = wr.players.get(d.id); break; } }
+      }
+      if (!t && d.username) {
+        const tk = store.userKey(d.username);
+        t = tk ? presence.get(tk) : null;
+      }
+      if (!t) return cb({ ok: false, err: 'ผู้เล่นออฟไลน์แล้ว' });
+      cb({
+        ok: true,
+        peer: {
+          ...pubPlayer(t),
+          discoveredCount: (t.prof.discovered || []).length,
+          carsOwned: (t.prof.owned || []).filter((k) => k.startsWith('car:')).length + 1,
+          escapes: t.prof.escapes || 0,
+          busted: t.prof.busted || 0,
+          sameWorld: t.w === w,
+        },
+      });
     });
     sock.on('friend:add', (d = {}, cb) => {
       if (typeof cb !== 'function' || noPlayer(cb) || needAccount(cb)) return;
@@ -638,6 +752,7 @@ function attachRooms(httpServer) {
       if (isBest) p.prof.stuntBest = pts;
       p.prof.rep += rw.rep;
       credit(p, rw.cash, 'stunt', { pts, kind: String(d.kind || '').slice(0, 24) });
+      emitPeerSync(w, p);
       cb({ ok: true, pts, cash: rw.cash, rep: rw.rep, best: isBest, me: me(p) });
     });
     // record personal drag test times (0-100 km/h & 402m quarter mile)
@@ -655,7 +770,7 @@ function attachRooms(httpServer) {
         const v = Math.round(t402 * 100) / 100;
         if (!(p.prof.best.drag402 <= v)) { p.prof.best.drag402 = v; updated = true; }
       }
-      if (updated) { p.prof.rep += 15; store.touch(); }
+      if (updated) { p.prof.rep += 15; store.touch(); emitPeerSync(w, p); }
       cb({ ok: true, updated, rep: updated ? 15 : 0, me: me(p) });
     });
     // likes for a car you saw: once per day per car owner, +5 REP for them
@@ -668,6 +783,7 @@ function attachRooms(httpServer) {
       if (p.prof.liked[t.key] === day) return cb({ ok: false, err: 'กดถูกใจคันนี้ไปแล้ววันนี้' });
       p.prof.liked[t.key] = day;
       t.prof.likes = (t.prof.likes || 0) + 1; t.prof.rep += 5; store.touch();
+      emitPeerSync(w, t);
       io.to(t.id).emit('liked', { name: p.name, likes: t.prof.likes });
       cb({ ok: true, likes: t.prof.likes });
     });

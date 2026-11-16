@@ -1,6 +1,9 @@
 // Players in this world (with "challenge" buttons) and world chat. No rooms or codes:
 // the server puts everyone into a shared world automatically.
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+import { carShowcaseSummary } from './engine.js';
+import { GENERATIONS } from './catalog.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warpTo }) {
   const btn = document.getElementById('btnOnline');
@@ -66,10 +69,18 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warp
         const distTxt = p.pose && mePos
           ? ` · ${Math.round(Math.hypot(p.pose.x - mePos.x, p.pose.z - mePos.z))}ม.`
           : p.inGarage ? ' · ในอู่' : '';
-        return `<li><div class="ob-pname">${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}<small>${p.username ? `@${esc(p.username)}` : ''}${distTxt}</small></div> <span class="ob-acts"><button data-warp="${p.id}" title="วาร์ปไปหาเพื่อนคนนี้">🚀</button><button data-look="${p.id}" title="ส่องรถ 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
+        let carHtml = '';
+        const b = p.car?.b || p.build;
+        if (b) {
+          try {
+            const sc = carShowcaseSummary(b, GENERATIONS.find((x) => x.id === b.gen));
+            carHtml = ` <span class="ob-cls" style="color:${esc(sc.color)}">${esc(sc.cls)}${sc.pi}</span><small class="ob-spec">${esc(sc.carName)} · ${sc.cc.toLocaleString()}cc · ${sc.hp}HP</small>`;
+          } catch {}
+        }
+        return `<li><div class="ob-pname clickable" data-look="${p.id}" title="คลิกเพื่อดูโปรไฟล์รถ 3D">${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}${carHtml}<small>${p.username ? `@${esc(p.username)}` : ''}${p.inRace ? ' · 🏁 กำลังแข่ง' : ''}${distTxt}</small></div> <span class="ob-acts"><button data-warp="${p.id}" title="วาร์ปไปหาเพื่อนคนนี้">🚀</button><button data-look="${p.id}" title="ส่องรถ & สเปค 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
       }).join('')}</ul>
       ${list.length ? '' : '<p class="ob-note">ยังไม่มีใครอื่นในเมืองตอนนี้ — ชวนเพื่อนเปิดเว็บเดียวกันก็จะเจอกันในเมืองเดียวทันที</p>'}
-      <p class="ob-note">กด 🚀 วาร์ปไปหาใครก็ได้ในเมือง · <kbd>H</kbd> แตร · <kbd>L</kbd> กะพริบไฟ · <kbd>C</kbd> ท้าแข่ง</p>`;
+      <p class="ob-note">คลิกซ้าย/ขวาที่รถเพื่อนบนถนนหรือแผนที่เพื่อส่องสเปค · <kbd>H</kbd> แตร · <kbd>L</kbd> ไฟ · <kbd>V</kbd> เบิ้ล · <kbd>C</kbd> ท้าแข่ง</p>`;
     body.querySelector('#obMeetBtn').onclick = () => { open(false); carMeet?.(); };
     body.querySelectorAll('.ob-emotes button').forEach((b) => {
       b.onclick = () => { online.chat(b.dataset.emote); toast('💬 ส่งทักทายแล้ว'); };
@@ -93,7 +104,7 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warp
         warpTo?.(livePose, r.id);
       };
     });
-    body.querySelectorAll('button[data-look]').forEach((b) => {
+    body.querySelectorAll('[data-look]').forEach((b) => {
       b.onclick = () => { const p = online.peers.get(b.dataset.look); if (p) { open(false); inspect(p); } };
     });
     body.querySelectorAll('button[data-like]').forEach((b) => {

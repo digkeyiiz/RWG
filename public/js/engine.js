@@ -245,3 +245,97 @@ export function simulateRun(perf, mu = 1.0) {
   }
   return { t100, quarter: q, topKmh: top * 3.6 };
 }
+
+export const EXHAUST_NAMES = {
+  stock: 'ท่อเดิมเงียบ',
+  sport: 'ท่อซิ่ง Sport',
+  titanium: 'ท่อ Titanium',
+  popbang: 'ท่อแต่ง Pop & Bang',
+};
+
+const CAR_NAMES = {
+  gen1: 'Vios Gen 1 (XP40)',
+  'gen1-fl': 'Soluna Vios (ไมเนอร์เชนจ์)',
+  gen2: 'Vios Gen 2 (XP90)',
+  'gen2-fl': 'Vios Gen 2 ไมเนอร์เชนจ์',
+  gen3: 'Vios Gen 3 (XP150)',
+  'gen3-fl1': 'Vios Gen 3 ไมเนอร์เชนจ์',
+  'gen3-fl2': 'Vios Gen 3 ไมเนอร์เชนจ์ 2',
+  gen4: 'Vios Gen 4 / Yaris ATIV',
+  'civic-eg': 'Civic EG (3 ประตู)',
+  'civic-ek': 'Civic EK (Ferio 2000)',
+  'civic-fd': 'Civic FD (MK8 Sedan)',
+  'civic-fc': 'Civic FC (Sedan)',
+  'civic-fe': 'Civic FE (แฮตช์แบ็ก)',
+  'evo-ix': 'Lancer Evolution IX',
+  'nissan-silvia-s13': 'Nissan Silvia S13',
+  'supra-a80': 'Supra MK4 (JZA80)',
+  'skyline-r34': 'Skyline GT-R (BNR34)',
+  'rx7-fd': 'RX-7 (FD3S)',
+  ae86: 'Sprinter Trueno (AE86)',
+  'jazz-gk': 'Jazz GK (Fit RS)',
+  dmax: 'D-Max (สายซิ่งไทย)',
+};
+
+// Shared compact car + engine showcase summary (pure math, safe in Node & browser)
+export function carShowcaseSummary(build, genObj = null) {
+  const b = build || { gen: 'gen2' };
+  const spec = carSpec(b.gen);
+  const perf = computePerf(b);
+  const run = simulateRun(perf);
+  const E = perf.engine;
+  const eng = perf.eng;
+  const isSwapped = !!(eng.swap && eng.swap !== spec.engine);
+  const mods = [];
+  for (const [k, id] of Object.entries(eng.parts || {})) {
+    if (!id || id === 'stock') continue;
+    const p = PARTS[k];
+    const opt = p?.opts?.find((o) => o.id === id);
+    if (p && opt) mods.push({ key: k, part: p.name, name: opt.name, id });
+  }
+  const exSnd = b.kit?.exhaustSound || 'sport';
+  return {
+    carName: b.name || genObj?.name || CAR_NAMES[b.gen] || b.gen || 'Car',
+    gen: b.gen || 'gen2',
+    engineId: E.id,
+    engineName: E.name,
+    engineMake: E.make,
+    cc: E.cc || 1497,
+    liters: ((E.cc || 1497) / 1000).toFixed(1),
+    cyl: E.cyl || 4,
+    rotary: !!E.rotary,
+    layoutText: E.rotary ? `${E.cyl || 2} โรเตอร์ Rotary` : `${E.cyl || 4} สูบ`,
+    isSwapped,
+    hasTurbo: perf.hasTurbo,
+    boost: Math.round(perf.boost || 0),
+    aspText: perf.hasTurbo ? `Turbo +${Math.round(perf.boost || 0)} PSI` : 'NA ดูดสด',
+    hp: Math.round(perf.peakHp),
+    hpRpm: perf.peakHpRpm,
+    tq: Math.round(perf.peakTq),
+    tqRpm: perf.peakTqRpm,
+    redline: perf.redline,
+    mass: Math.round(perf.mass),
+    hpPerTon: Math.round((perf.peakHp / Math.max(0.5, perf.mass / 1000)) * 10) / 10,
+    drive: perf.drive,
+    pi: perf.rating.pi,
+    cls: perf.rating.cls,
+    color: perf.rating.color,
+    t100: run.t100,
+    quarter: run.quarter,
+    topKmh: Math.round(run.topKmh),
+    paintColor: b.paint?.color || '#888',
+    paintFinish: b.paint?.finish || 'gloss',
+    livery: b.paint?.livery || 'none',
+    exhaustSound: exSnd,
+    exhaustLabel: EXHAUST_NAMES[exSnd] || exSnd,
+    rim: b.wheels?.rim || 15,
+    tireWidth: b.wheels?.tireWidth || 185,
+    tireAspect: b.wheels?.aspect || 60,
+    tireType: b.wheels?.tireType || 'comfort',
+    tireBrand: b.wheels?.tireBrand || 'oem',
+    wheelBrand: b.wheels?.brand || 'oem',
+    mods,
+    perf,
+  };
+}
+

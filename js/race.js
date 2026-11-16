@@ -4,7 +4,8 @@ import * as THREE from 'three';
 import { LAYOUT } from './city/city.js';
 import { BOT_GENS, BOT_PAINTS, loadBotModels, botReady, makeBotBody } from './city/botcars.js';
 import { makeVehicle } from './city/vehicles.js';
-import { computePerf, PARTS, bestGear, driveAccel, rpmFor } from './engine.js';
+import { computePerf, PARTS, bestGear, driveAccel, rpmFor, carShowcaseSummary } from './engine.js';
+import { GENERATIONS } from './catalog.js';
 
 const BEST_KEY = 'viosGarage.raceBest.v1';
 const fmt = (t) => { if (t == null || !isFinite(t)) return '--:--.--'; const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(2).padStart(5, '0')}`; };
@@ -64,6 +65,9 @@ function filleted(corners, r, y = 0, arcStep = 3) {
 
 export function buildTracks(city, touge) {
   const T = {};
+  const c = LAYOUT.c;
+  const spLoop = [[c[3], c[3]], [c[6], c[3]], [c[6], c[6]], [c[3], c[6]]];
+  T.sprint = { id: 'sprint', name: '⚡ สตรีทสปรินท์ ดินแดง-อโศก', desc: '750 ม. · เซอร์กิตสปรินท์ 4 แยก ดวลเดือดทันใจ', pts: samplesFrom(filleted(spLoop, 14), 3), half: 7.6, laps: 1, cps: 6, startAt: 0.14 };
   if (touge) {
     const p = touge.path.map((q) => ({ ...q }));
     finish(p, touge.path.len);
@@ -71,7 +75,6 @@ export function buildTracks(city, touge) {
   }
   const ry = LAYOUT.ring.y;
   T.ring = { id: 'ring', name: '🛣️ ทางด่วนศรีรัช · มอเตอร์เวย์', desc: '2.5 กม. · ทางด่วนยกระดับ ผ่านด่าน Easy Pass / M-Flow', pts: samplesFrom(city.ringPts.map(([x, z]) => [x, ry, z]), 3), half: 6.0, laps: 2, cps: 8, startAt: 0.12 };
-  const c = LAYOUT.c;
   const loop = [[c[0], c[0]], [c[6], c[0]], [c[6], c[3]], [c[9], c[3]], [c[9], c[9]], [c[3], c[9]], [c[3], c[6]], [c[0], c[6]]];
   T.city = { id: 'city', name: '🏙️ ถนนพระราม 9 · อโศก', desc: '2.9 กม. · ใจกลางกรุงเทพฯ ผ่านตึกมหานคร-ใบหยก', pts: samplesFrom(filleted(loop, 16), 3), half: 7.6, laps: 2, cps: 8, startAt: 0.06 };
   for (const t of Object.values(T)) {
@@ -265,21 +268,61 @@ export class Race {
     if (trackId) { o.track = trackId; o.laps = Math.min(o.laps, 3); }
     this.target = target;
     const seg = (key, opts) => `<div class="gfx-seg" data-k="${key}">${opts.map(([v, n]) => `<button data-v="${v}" class="${String(o[key]) === String(v) ? 'on' : ''}">${n}</button>`).join('')}</div>`;
-    const pi = computePerf(this.getBuild()).rating;
+    const myB = this.getBuild();
+    const mySpec = carShowcaseSummary(myB, GENERATIONS.find((x) => x.id === myB.gen));
+    const pi = mySpec.perf.rating;
     const best = this.bestOf(o.track);
     const E = this.econ;
     const onlineOk = !!this.online.inRoom;
+    const peer = target?.id ? this.online.peers.get(target.id) : null;
+    const rivalB = peer?.car?.b || peer?.build || null;
+    const rivalSpec = rivalB ? carShowcaseSummary(rivalB, GENERATIONS.find((x) => x.id === rivalB.gen)) : null;
+
+    const duelBox = target ? `
+      <div class="rs-duel">
+        <span>⚔️ ท้าแข่ง 1v1 กับ <b>${esc(target.name)}</b></span>
+        ${peer ? '<button type="button" class="rs-peek" data-peek="1">🔍 ส่องรถคู่แข่ง</button>' : ''}
+      </div>
+      <div class="rs-vs">
+        <div class="rv-col">
+          <small>รถของคุณ</small>
+          <b>${esc(mySpec.carName)}</b>
+          <span>${mySpec.cc.toLocaleString()}cc · ${mySpec.hp} HP · <i style="color:${pi.color}">${pi.cls}${pi.pi}</i></span>
+        </div>
+        <em>VS</em>
+        <div class="rv-col r">
+          <small>คู่แข่ง</small>
+          <b>${esc(rivalSpec ? rivalSpec.carName : target.name)}</b>
+          <span>${rivalSpec ? `${rivalSpec.cc.toLocaleString()}cc · ${rivalSpec.hp} HP · <i style="color:${rivalSpec.color}">${rivalSpec.cls}${rivalSpec.pi}</i>` : 'กำลังโหลดข้อมูลรถ…'}</span>
+        </div>
+      </div>
+      <button type="button" class="rs-preset ${o.track === 'sprint' && o.laps === 1 && o.bots === 0 ? 'on' : ''}">⚡ สูตรดวล 1v1 ทันใจ (Sprint 750 ม. · 1 รอบ · 0 บอท)</button>` : '';
+
+    const btnsHtml = target
+      ? `<button class="rs-go on" data-now="0">⚔️ ส่งคำท้าแข่งให้ ${esc(target.name)} (รอตอบรับ 20 วิ)</button>`
+      : `<button class="rs-go on" data-now="1">🏁 เริ่มทันที</button>${onlineOk ? '<button class="rs-go" data-now="0">📣 เปิดรับคู่แข่ง 20 วิ</button>' : ''}`;
+
     box.innerHTML = `
-      ${target ? `<div class="rs-duel">⚔️ ท้าแข่งกับ <b>${esc(target.name)}</b></div>` : ''}${party ? '<div class="rs-duel">🎉 แข่งกับปาร์ตี้ — ทุกคนในเมืองเดียวกันจะถูกพาเข้าเส้นสตาร์ท</div>' : ''}
-      <div class="rs-car">รถของคุณ: <b>${esc(this.getBuild().name)}</b> <span class="cls" style="--pc:${pi.color}">${pi.cls} ${pi.pi}</span></div>
+      ${duelBox}${party ? '<div class="rs-duel">🎉 แข่งกับปาร์ตี้ — ทุกคนในเมืองเดียวกันจะถูกพาเข้าเส้นสตาร์ท</div>' : ''}
+      ${target ? '' : `<div class="rs-car">รถของคุณ: <b>${esc(mySpec.carName)}</b> <small>(${mySpec.cc.toLocaleString()}cc · ${mySpec.hp} HP)</small> <span class="cls" style="--pc:${pi.color}">${pi.cls} ${pi.pi}</span></div>`}
       <label>สนาม</label>
-      <div class="rs-tracks">${['touge', 'city', 'ring'].map((id) => `<button data-track="${id}" class="${o.track === id ? 'on' : ''}"><b>${T[id]?.name || id}</b><small>${T[id]?.desc || ''}</small><i>สถิติคุณ: ${fmt(this.bestOf(id))}</i></button>`).join('')}</div>
+      <div class="rs-tracks">${['sprint', 'touge', 'city', 'ring'].map((id) => `<button data-track="${id}" class="${o.track === id ? 'on' : ''}"><b>${T[id]?.name || id}</b><small>${T[id]?.desc || ''}</small><i>สถิติคุณ: ${fmt(this.bestOf(id))}</i></button>`).join('')}</div>
       <label>จำนวนรอบ</label>${seg('laps', [[1, '1'], [2, '2'], [3, '3']])}
       <label>บอทร่วมแข่ง</label>${seg('bots', [[0, 'ไม่มี'], [2, '2'], [3, '3'], [5, '5']])}
       <label>ความยากบอท</label>${seg('diff', [[0, 'ง่าย'], [1, 'ปกติ'], [2, 'ยาก'], [3, 'โหด']])}
       <div class="rs-prize">🏆 เงินรางวัลที่ 1: <b>฿${(E ? E.racePrize(o.track, o.laps, 0, 2, o.bots) : 0).toLocaleString()}</b> (แข่งกับคนจริง 2 คน) · กับบอท <b>฿${(E ? E.racePrize(o.track, o.laps, 0, 1, o.bots) : 0).toLocaleString()}</b>${best ? ` · สถิติคุณ ${fmt(best)}` : ''}</div>
-      <div class="rr-btns"><button class="rs-go on" data-now="1">🏁 เริ่มทันที</button>${onlineOk ? '<button class="rs-go" data-now="0">📣 เปิดรับคู่แข่ง 20 วิ</button>' : ''}</div>
-      <p class="ob-note">${onlineOk ? 'ผู้เล่นทุกคนในเมืองจะเห็นคำเชิญและกดเข้าร่วมได้ · เงินรางวัลตรวจสอบโดยเซิร์ฟเวอร์' : 'กำลังเล่นแบบออฟไลน์ — แข่งกับบอทและสะสมเงิน/REP ได้ทันที'}</p>`;
+      <div class="rr-btns">${btnsHtml}</div>
+      <p class="ob-note">${target ? 'คู่แข่งจะได้รับการ์ดคำท้า กดยอมรับแล้วปล่อยตัวพร้อมกันใน 2.5 วินาที' : onlineOk ? 'ผู้เล่นทุกคนในเมืองจะเห็นคำเชิญและกดเข้าร่วมได้ · เงินรางวัลตรวจสอบโดยเซิร์ฟเวอร์' : 'กำลังเล่นแบบออฟไลน์ — แข่งกับบอทและสะสมเงิน/REP ได้ทันที'}</p>`;
+    box.querySelector('.rs-peek')?.addEventListener('click', () => {
+      if (!peer) return;
+      this.el.setup.hidden = true;
+      this.hooks.inspectPeer?.(peer);
+    });
+    box.querySelector('.rs-preset')?.addEventListener('click', () => {
+      o.track = 'sprint'; o.laps = 1; o.bots = 0;
+      this.saveOpt();
+      this.openSetup(null, target, party);
+    });
     box.querySelectorAll('.rs-tracks button').forEach((b) => { b.onclick = () => { o.track = b.dataset.track; this.saveOpt(); this.openSetup(null, target, party); }; });
     box.querySelectorAll('.gfx-seg').forEach((sg) => sg.querySelectorAll('button').forEach((b) => {
       b.onclick = () => { const v = b.dataset.v; o[sg.dataset.k] = v === 'true' ? true : v === 'false' ? false : +v; this.saveOpt(); this.openSetup(null, target, party); };
@@ -301,6 +344,7 @@ export class Race {
     }
     const r = await this.online.raceOpen({ track: o.track, laps: o.laps, bots: o.bots, diff: o.diff, now, to: this.target?.id || null, party: !!this.partyMode });
     if (!r?.ok) this.toast(r?.err || 'เปิดแข่งไม่ได้');
+    else if (this.target) this.toast(`⚔️ ส่งคำท้าแข่งให้ ${this.target.name} แล้ว — รอตอบรับ 20 วิ`);
     else if (!now) this.toast('📣 เปิดรับคู่แข่งแล้ว — เริ่มใน 20 วินาที');
   }
 
@@ -310,12 +354,14 @@ export class Race {
     await this.hooks.enterCity();
     const track = this.tracks[cfg.track] || this.tracks.touge;
     this.mp = mp; this.cfg = cfg; this.track = track;
+    this.racers = cfg.specs || {};
     this.laps = Math.max(1, Math.min(9, cfg.laps | 0));
     const rand = mulberry(cfg.seed >>> 0);
     this.hooks.setTraffic(!!cfg.traffic);
     // grid: online players by server order, then bots
     const me = this.online.myId || 'me';
     const grid = cfg.grid || [me];
+    this.rivals = grid.filter((id) => id !== me).map((id) => ({ id, name: this.online.peers.get(id)?.name || 'คู่แข่ง' }));
     const mySlot = Math.max(0, grid.indexOf(me));
     this.tracker = new Tracker(track);
     const P = track.pts, st = P[track.start];
@@ -361,6 +407,9 @@ export class Race {
     }
     this.buildGates();
     this.peerProg.clear();
+    grid.forEach((sid, idx) => {
+      if (sid !== me) this.peerProg.set(sid, { id: sid, d: slotS(idx), f: 0, name: this.online.peers.get(sid)?.name });
+    });
     this.state = 'countdown';
     this.startAt = performance.now() / 1000 + Math.max(3.2, (cfg.inMs || 0) / 1000);
     this.driver.frozen = true;
@@ -495,8 +544,9 @@ export class Race {
     for (const b of this.bots) rows.push({ id: b.name, name: b.name, d: b.finished != null ? this.laps * lapLen + 1e6 - b.finished : b.raced, fin: b.finished });
     for (const [id, pr] of this.peerProg) {
       const peer = this.online.peers.get(id);
-      if (!peer) continue;
-      rows.push({ id, name: peer.name, d: pr.f ? this.laps * lapLen + 1e6 - pr.f : pr.d, fin: pr.f || null });
+      const name = peer?.name || pr.name;
+      if (!name || (!peer && !pr.f)) continue;
+      rows.push({ id, name, d: pr.f ? this.laps * lapLen + 1e6 - pr.f : pr.d, fin: pr.f || null, spec: pr.spec || null });
     }
     rows.sort((a, b) => b.d - a.d);
     void T;
@@ -504,7 +554,9 @@ export class Race {
   }
   renderHud(T, carPos) {
     const rows = this.standings(T);
-    const pos = rows.findIndex((r) => r.me) + 1;
+    const meRow = rows.find((r) => r.me);
+    const pos = rows.indexOf(meRow) + 1;
+    const myD = this.finishT != null ? this.laps * this.track.pts.len : (meRow?.d ?? this.myRaced());
     const lap = Math.max(1, Math.min(this.laps, (this.tracker.lap ?? 0) + 1));
     const h = this.el.hud;
     if (!h.firstChild) h.innerHTML = '<div class="rh-main"><div class="rh-pos"></div><div class="rh-lap"></div><div class="rh-time"></div></div><div class="rh-next"></div><ol class="rh-list"></ol>';
@@ -526,7 +578,17 @@ export class Race {
       nxEl.hidden = true;
     }
     const list = h.querySelector('.rh-list');
-    const html = rows.slice(0, 8).map((r, i) => `<li class="${r.me ? 'me' : ''}">${i + 1}. ${esc(r.name)}${r.fin != null ? ' 🏁' : ''}</li>`).join('');
+    const html = rows.slice(0, 8).map((r, i) => {
+      let badge = '';
+      if (r.fin != null) badge = ' 🏁';
+      else if (!r.me && this.finishT == null) {
+        const gap = Math.round(r.d - myD);
+        if (Math.abs(gap) >= 2 && Math.abs(gap) < 50000) {
+          badge = ` <small class="rh-gap ${gap > 0 ? 'ahead' : 'behind'}">${gap > 0 ? '+' : ''}${gap}ม.</small>`;
+        }
+      }
+      return `<li class="${r.me ? 'me' : ''}">${i + 1}. ${esc(r.name)}${badge}</li>`;
+    }).join('');
     if (list.innerHTML !== html) list.innerHTML = html;
   }
   finish(T) {
@@ -553,16 +615,46 @@ export class Race {
       this.results(rows, true);
     }
   }
+  _specForRow(x) {
+    if (x.me) {
+      const b = this.getBuild();
+      return carShowcaseSummary(b, GENERATIONS.find((g) => g.id === b.gen));
+    }
+    if (this.racers?.[x.id]) return this.racers[x.id];
+    if (x.spec) return x.spec;
+    const p = this.online.peers.get(x.id);
+    const b = p?.car?.b || p?.build;
+    return b ? carShowcaseSummary(b, GENERATIONS.find((g) => g.id === b.gen)) : null;
+  }
   results(rows, final) {
     const r = this.el.res;
     if (final) r.dataset.final = '1'; else delete r.dataset.final;
+    const winFin = rows.find((x) => x.fin != null)?.fin ?? null;
+    const rival = this.online.inRoom ? (this.rivals || []).find((rv) => this.online.peers.has(rv.id)) : null;
     r.innerHTML = `<div class="rr-card"><h3>🏁 ผลการแข่ง — ${this.track.name}</h3>
-      <table>${rows.map((x, i) => `<tr class="${x.me ? 'me' : ''}"><td>${i + 1}</td><td>${esc(x.name)}</td><td>${x.fin != null ? fmt(x.fin) : final ? 'ไม่จบ' : 'กำลังวิ่ง…'}</td></tr>`).join('')}</table>
+      <table>${rows.map((x, i) => {
+        const sp = this._specForRow(x);
+        const spHtml = sp ? `<small class="rr-spec">${esc(sp.carName)} · ${Number(sp.cc || 1497).toLocaleString()}cc · ${sp.hp}HP · ${esc(sp.cls)}${sp.pi}</small>` : '';
+        const gap = i > 0 && x.fin != null && winFin != null ? ` <small>+${(x.fin - winFin).toFixed(2)}s</small>` : '';
+        const timeTxt = x.fin != null ? `${fmt(x.fin)}${gap}` : final ? 'ไม่จบ' : 'กำลังวิ่ง…';
+        return `<tr class="${x.me ? 'me' : ''}"><td>${i + 1}</td><td><div>${esc(x.name)}</div>${spHtml}</td><td>${timeTxt}</td></tr>`;
+      }).join('')}</table>
       ${this.prize?.ok ? `<div class="rr-prize"><b>+฿${this.prize.prize.toLocaleString()}</b><span>+${this.prize.rep} REP</span></div>` : this.prize ? `<p class="bad">${esc(this.prize.err || '')}</p>` : this.finishT != null ? '<p>กำลังตรวจสอบผลกับเซิร์ฟเวอร์…</p>' : ''}
       <p>${this.lapTimes.length ? 'รอบดีสุด ' + fmt(Math.min(...this.lapTimes)) + ' · ' : ''}สถิติสนามนี้ ${fmt(this.best[this.track.id])}</p>
-      <div class="rr-btns"><button class="on" data-a="again">🔁 แข่งอีกครั้ง</button><button data-a="setup">⚙️ เปลี่ยนสนาม</button><button data-a="quit">ขับเล่นต่อ</button></div></div>`;
+      <div class="rr-btns">
+        ${rival ? `<button class="on" data-a="rematch">🔁 ท้าแก้มือ ${esc(rival.name)}</button>` : ''}
+        <button class="${rival ? '' : 'on'}" data-a="again">🔁 แข่งอีกครั้ง</button>
+        <button data-a="setup">⚙️ เปลี่ยนสนาม</button>
+        <button data-a="quit">ขับเล่นต่อ</button>
+      </div></div>`;
     r.hidden = false;
-    r.querySelector('[data-a=again]').onclick = () => { this.abort(); this.requestStart(true); };
+    r.querySelector('[data-a=rematch]')?.addEventListener('click', () => {
+      this.abort();
+      this.target = rival;
+      this.partyMode = false;
+      this.requestStart(false);
+    });
+    r.querySelector('[data-a=again]').onclick = () => { this.abort(); this.target = null; this.partyMode = false; this.requestStart(true); };
     r.querySelector('[data-a=setup]').onclick = () => { this.abort(); this.openSetup(); };
     r.querySelector('[data-a=quit]').onclick = () => this.abort();
   }
@@ -597,13 +689,16 @@ export class Race {
   onNet(ev, d) {
     if (ev === 'start') {
       this.el.setup.hidden = true;
-      this.begin({ ...d.cfg, grid: d.grid, inMs: d.inMs }, true, d.raceId);
+      this.begin({ ...d.cfg, grid: d.grid, specs: d.specs, inMs: d.inMs }, true, d.raceId);
       this.toast(d.grid.length > 1 ? `🏁 แข่ง ${d.grid.length} คน — เตรียมตัว!` : '🏁 เตรียมตัว!');
     } else if (ev === 'p') {
       const pr = this.peerProg.get(d.id);
-      if (!pr?.f) this.peerProg.set(d.id, { ...d, f: 0 });
+      if (!pr?.f) this.peerProg.set(d.id, { ...pr, ...d, f: 0 });
     } else if (ev === 'result') {
-      if (d.id !== this.online.myId) this.peerProg.set(d.id, { id: d.id, d: this.laps * (this.track?.pts.len || 0), f: d.t });
+      if (d.id !== this.online.myId) {
+        const pr = this.peerProg.get(d.id);
+        this.peerProg.set(d.id, { ...pr, id: d.id, d: this.laps * (this.track?.pts.len || 0), f: d.t, name: d.name || pr?.name, spec: d.spec || pr?.spec });
+      }
     }
   }
 

@@ -8,7 +8,7 @@ import { loadTemplate } from './glbcar.js';
 import { Online } from './net.js';
 import { setupOnlineUI } from './onlineui.js';
 import { Garage } from './garage.js';
-import { computePerf } from './engine.js';
+import { computePerf, carShowcaseSummary } from './engine.js';
 import { GfxSettings, settingsPanel, FrameGovernor, SHADOW_SIZE, VIEW, TRAFFIC } from './settings.js';
 import { Race } from './race.js';
 import { GameWorld } from './game.js';
@@ -173,6 +173,7 @@ const race = new Race({
     enterCity: async () => { if (cityMap !== 'bkk') await switchCityMap('bkk'); if (mode !== 'city') await setMode('city'); },
     spawn: (sp) => spawnRaw(sp),
     setTraffic: (v) => { raceTraffic = v; syncTraffic(); },
+    inspectPeer: (p) => social.inspect(p),
     reward: (res) => { game.updateWallet(res.prize); if (res.prize) { game.popGain('+฿' + res.prize.toLocaleString(), true); game.sound('big'); } game.feed(`🏆 ได้รางวัล <b>฿${res.prize.toLocaleString()}</b> · +${res.rep} REP`, 'gold'); },
     offlineFinish: ({ track, laps, bots, pos, t }) => {
       const prize = ECON.racePrize(track, laps, pos, 1, bots);
@@ -226,6 +227,7 @@ const game = new GameWorld({
   scene, driver, online, race, toast,
   hooks: {
     enterGarage: (m) => enterGarage(m),
+    inspectPeer: (p) => social.inspect(p),
     minimap: () => C?.minimap,
     chased: () => false,
     hide: () => true,
@@ -519,8 +521,20 @@ function spawnAt(sp) {
   camera.position.copy(back); controls.target.copy(car.root.position).y += 0.8;
 }
 
+const peerHoverEl = document.getElementById('peerHover');
+let inspecting = null, inspectCam = null, prevInspectPos = null, inspectLatched = false;
+function hidePeerHover() {
+  if (online) online.hoverPeerId = null;
+  renderer.domElement.style.cursor = '';
+  if (peerHoverEl) peerHoverEl.hidden = true;
+}
+
 async function setMode(m, spawn = null) {
   if (m === 'city') await ensureCity();
+  if (m !== 'city') {
+    hidePeerHover();
+    if (inspecting && typeof social !== 'undefined') social.closeInspect();
+  }
   mode = m;
   document.querySelectorAll('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
   world.setMode(m);
@@ -686,8 +700,19 @@ const goCarMeet = async () => {
 document.getElementById('btnCarMeet').onclick = goCarMeet;
 const doHorn = () => { driver.playHorn(); online?.carAct('horn'); };
 const doFlash = () => { car.flashLights(); online?.carAct('flash'); };
+let revCooldown = 0;
+const doRev = () => {
+  if (mode !== 'city' && mode !== 'drive') return;
+  const nowMs = performance.now();
+  if (nowMs - revCooldown < 450) return;
+  revCooldown = nowMs;
+  driver.playSampleRev(driver.perf, build.kit?.exhaustSound || 'sport', 0.9);
+  carFx.triggerBackfire(1.3);
+  online?.carAct('rev');
+};
 document.getElementById('btnHorn').onclick = doHorn;
 document.getElementById('btnFlash').onclick = doFlash;
+document.getElementById('btnRev')?.addEventListener('click', doRev);
 document.getElementById('btnBackGarage').onclick = () => {
   enterGarage(inGarage || { id: 'showroom', name: 'อู่กลาง & โชว์รูม' });
 };
@@ -732,9 +757,19 @@ function updateDragTest(dt, kmh, spd) {
 }
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Escape') {
+    if (!document.getElementById('inspect')?.hidden) social.closeInspect();
+    else if (!document.getElementById('worldMap')?.hidden) game.toggleMap(false);
+    else if (!document.getElementById('raceSetup')?.hidden) document.getElementById('raceSetup').hidden = true;
+    else if (!document.getElementById('profile')?.hidden) document.getElementById('profile').hidden = true;
+    else if (!document.getElementById('onlineBox')?.hidden) document.getElementById('onlineBox').hidden = true;
+    else if (!document.getElementById('social')?.hidden) social.open(false);
+    return;
+  }
   if (e.code === 'KeyG' && (mode === 'city' || mode === 'drive')) openShowroom();
   if (e.code === 'KeyH' && (mode === 'city' || mode === 'drive')) doHorn();
   if (e.code === 'KeyL' && (mode === 'city' || mode === 'drive')) doFlash();
+  if (e.code === 'KeyV' && (mode === 'city' || mode === 'drive')) doRev();
   if (e.code === 'KeyR' && (mode === 'city' || mode === 'drive')) { if (mode === 'drive') resetDragTest(); document.getElementById('btnResetCar').click(); }
 });
 const btnSound = document.getElementById('btnSound');
@@ -1042,13 +1077,30 @@ function frame(now) {
     const cp = car.root.position;
     _camDelta.copy(cp).sub(lastCarPos);
     if (inspecting?.car?.root.visible) {
-      // showcase: orbit the other player's car
+      // showcase: orbit the other player's car smoothly while following if driving
       const tp = inspecting.car.root.position;
-      _camTmp.set(tp.x, tp.y + 0.7, tp.z);
-      controls.target.lerp(_camTmp, Math.min(1, dt * 4));
-      _camTmp.copy(camera.position).sub(controls.target);
-      const len = _camTmp.length();
-      if (len > 9 || len < 4) camera.position.copy(controls.target).add(_camTmp.setLength(6.5).setY(Math.max(1.4, _camTmp.y)));
+      if (!inspectLatched) {
+        inspectLatched = true;
+        const h = inspecting.pose?.h ?? 0;
+        prevInspectPos = prevInspectPos ? prevInspectPos.copy(tp) : tp.clone();
+        controls.target.set(tp.x, tp.y + 0.7, tp.z);
+        camera.position.set(tp.x + Math.cos(h + 0.72) * 5.8, tp.y + 1.85, tp.z - Math.sin(h + 0.72) * 5.8);
+      } else {
+        if (prevInspectPos) {
+          _camTmp.copy(tp).sub(prevInspectPos);
+          camera.position.add(_camTmp);
+          controls.target.add(_camTmp);
+          prevInspectPos.copy(tp);
+        }
+        _camTmp.set(tp.x, tp.y + 0.7, tp.z);
+        controls.target.lerp(_camTmp, Math.min(1, dt * 8));
+        _camTmp.copy(camera.position).sub(controls.target);
+        const len = _camTmp.length();
+        if (len > 10.5 || len < 3.8) camera.position.copy(controls.target).add(_camTmp.setLength(6.2).setY(Math.max(1.3, _camTmp.y)));
+      }
+    } else if (inspecting) {
+      inspectLatched = false;
+      camera.position.add(_camDelta);
     } else if (chase) {
       const [cd, ch] = CAM[gfx.get('cam')] || CAM.normal;
       const spd = driver.vel.length();
@@ -1144,7 +1196,6 @@ function frame(now) {
     navigator.serviceWorker.register('sw.js').catch(() => { });
   }
   // ---------- social: friends, party, warp, car showcase ----------
-  let inspecting = null;
   const warpToPose = async (pose, id) => {
     if (race.active) race.abort();
     if (inGarage) {
@@ -1170,8 +1221,34 @@ function frame(now) {
       warpTo: warpToPose,
       partyRace: async () => { await ensureCity(); race.openSetup(null, null, true); },
       challenge: (t) => race.openSetup(null, t),
-      startInspect: (peer) => { inspecting = peer; online.inspectingId = peer?.id || null; driver.frozen = true; document.body.classList.add('inspecting'); controls.autoRotate = true; controls.autoRotateSpeed = 1.2; },
-      endInspect: () => { inspecting = null; online.inspectingId = null; driver.frozen = false; document.body.classList.remove('inspecting'); controls.autoRotate = false; },
+      playRev: (perf, ex, vol) => driver.playSampleRev(perf, ex, vol),
+      localBuild: () => build,
+      startInspect: (peer) => {
+        if (!inspecting) inspectCam = { pos: camera.position.clone(), target: controls.target.clone() };
+        inspecting = peer;
+        inspectLatched = false;
+        prevInspectPos = null;
+        online.inspectingId = peer?.id || null;
+        driver.frozen = true;
+        hidePeerHover();
+        document.body.classList.add('inspecting');
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 1.2;
+      },
+      endInspect: () => {
+        inspecting = null;
+        inspectLatched = false;
+        prevInspectPos = null;
+        online.inspectingId = null;
+        driver.frozen = false;
+        document.body.classList.remove('inspecting');
+        controls.autoRotate = false;
+        if (inspectCam) {
+          camera.position.copy(inspectCam.pos);
+          controls.target.copy(inspectCam.target);
+          inspectCam = null;
+        }
+      },
     },
   });
   const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet, warpTo: warpToPose });
@@ -1179,7 +1256,92 @@ function frame(now) {
     if (ev?.carAct?.kind === 'horn' && mode === 'city') {
       const p = online.peers.get(ev.carAct.id)?.pose;
       if (!p || Math.hypot(p.x - driver.pos.x, p.z - driver.pos.z) <= 140) driver.playHorn();
+    } else if (ev?.carAct?.kind === 'rev' && mode === 'city') {
+      const peer = online.peers.get(ev.carAct.id);
+      const q = peer?.pose;
+      const d = q ? Math.hypot(q.x - driver.pos.x, q.z - driver.pos.z) : 999;
+      if (d <= 140 && peer) {
+        const b = peer.car?.b || peer.build || { gen: 'gen2' };
+        let sc = peer._hoverSpec;
+        if (peer._hoverB !== b || !sc) {
+          peer._hoverB = b;
+          const g = GENERATIONS.find((x) => x.id === b.gen);
+          sc = peer._hoverSpec = carShowcaseSummary(b, g);
+        }
+        driver.playSampleRev(sc.perf, sc.exhaustSound, Math.max(0.15, (1 - d / 140) * 0.85));
+        if (peer.car && q) {
+          const P = peer.car.P, cos = Math.cos(q.h), sin = Math.sin(q.h);
+          const rearX = -(P.L || 4.3) * 0.49;
+          const exType = b.kit?.exhaust || 'oem';
+          const zLocal = -(exType === 'split' || exType === 'quad' ? 0.54 : 0.44);
+          const wx = q.x + rearX * cos - zLocal * sin;
+          const wz = q.z - rearX * sin - zLocal * cos;
+          for (let i = 0; i < 6; i++) {
+            carFx.emitSpark(
+              wx, q.y + 0.23, wz,
+              -cos * (4 + Math.random() * 5) + (Math.random() - 0.5) * 2,
+              1 + Math.random() * 2,
+              sin * (4 + Math.random() * 5) + (Math.random() - 0.5) * 2,
+              '#ffb347',
+            );
+          }
+        }
+      }
     }
+  });
+
+  // Left/right click & hover on any peer car driving in the road (#view canvas)
+  const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  let ptrDown = null, lastHoverAt = 0;
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (mode === 'city') ptrDown = { x: e.clientX, y: e.clientY, btn: e.button };
+    else ptrDown = null;
+  });
+  renderer.domElement.addEventListener('mousemove', (e) => {
+    if (mode !== 'city' || !online.peers.size || e.buttons !== 0 || e.target !== renderer.domElement) {
+      if (online.hoverPeerId || (peerHoverEl && !peerHoverEl.hidden)) hidePeerHover();
+      return;
+    }
+    const t = performance.now();
+    if (t - lastHoverAt < 45) return;
+    lastHoverAt = t;
+    const hit = online.pickPeer(e.clientX, e.clientY, camera, renderer.domElement);
+    online.hoverPeerId = hit?.id || null;
+    renderer.domElement.style.cursor = hit ? 'pointer' : '';
+    if (!peerHoverEl) return;
+    if (!hit) { peerHoverEl.hidden = true; return; }
+    const b = hit.car?.b || hit.build;
+    let specHtml = '';
+    if (b) {
+      try {
+        if (hit._hoverB !== b) {
+          hit._hoverB = b;
+          const g = GENERATIONS.find((x) => x.id === b.gen);
+          hit._hoverSpec = carShowcaseSummary(b, g);
+        }
+        const sc = hit._hoverSpec;
+        if (sc) specHtml = ` · <span>${escHtml(sc.carName)}</span> · <b class="ph-cc">${sc.cc.toLocaleString()} cc · ${sc.hp} HP</b> · <span class="ph-cls" style="--pc:${escHtml(sc.color)}">${escHtml(sc.cls)}${sc.pi}</span>`;
+      } catch {}
+    }
+    peerHoverEl.innerHTML = `${hit.crew ? `<span class="crew-tag">[${escHtml(hit.crew)}]</span> ` : ''}<b>${escHtml(hit.name)}</b>${specHtml} · <small>คลิกซ้าย/ขวา ดูโปรไฟล์รถ</small>`;
+    peerHoverEl.hidden = false;
+  });
+  renderer.domElement.addEventListener('mouseleave', hidePeerHover);
+  renderer.domElement.addEventListener('pointerup', (e) => {
+    if (mode !== 'city' || e.target !== renderer.domElement) return;
+    if (e.button !== 0 && e.pointerType !== 'touch') return;
+    const drag = ptrDown ? Math.hypot(e.clientX - ptrDown.x, e.clientY - ptrDown.y) : 0;
+    if (drag >= 6) return;
+    const hit = online.pickPeer(e.clientX, e.clientY, camera, renderer.domElement);
+    if (hit) social.inspect(hit);
+  });
+  renderer.domElement.addEventListener('contextmenu', (e) => {
+    if (mode !== 'city' || e.target !== renderer.domElement) return;
+    e.preventDefault();
+    const drag = ptrDown ? Math.hypot(e.clientX - ptrDown.x, e.clientY - ptrDown.y) : 0;
+    if (drag >= 8) return;
+    const hit = online.pickPeer(e.clientX, e.clientY, camera, renderer.domElement);
+    if (hit) social.inspect(hit);
   });
 
   // ---------- instant entry: start straight in the game, connect online in background ----------

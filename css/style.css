@@ -1209,6 +1209,183 @@ body.racing #skillHud { top: 132px; }
   .sk-pts { font-size: 14px; }
 }
 
+/* ===================== v55: Road Peer Hover/Click Showcase, 1v1 Duel & Engine Flex ===================== */
+#btnRev {
+  background: linear-gradient(135deg, rgba(255, 106, 28, 0.24), rgba(255, 79, 109, 0.18));
+  border-color: rgba(255, 120, 60, 0.55);
+  color: #ffe7d6;
+  font-weight: 600;
+}
+#btnRev:hover { background: linear-gradient(135deg, rgba(255, 106, 28, 0.42), rgba(255, 79, 109, 0.34)); }
+
+/* Non-blocking bottom hover pill when pointing mouse at a friend's car on the road */
+#peerHover {
+  position: fixed;
+  left: 50%;
+  bottom: max(118px, calc(env(safe-area-inset-bottom) + 106px));
+  transform: translateX(-50%);
+  z-index: 7;
+  pointer-events: none;
+  max-width: min(640px, 90vw);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(10, 14, 22, 0.88);
+  border: 1px solid rgba(76, 195, 255, 0.55);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 16px rgba(76, 195, 255, 0.22);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  font-size: 13px;
+  color: #e9f2ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#peerHover .ph-cc { color: #fbbf24; font-weight: 700; }
+#peerHover .ph-cls { background: var(--pc, #4cc3ff); color: #090b10; font-weight: 800; padding: 1px 6px; border-radius: 6px; font-size: 11px; }
+#peerHover small { color: #9ecbff; font-size: 11px; }
+body.inspecting #peerHover, body.title #peerHover { display: none !important; }
+@media (pointer: coarse) { #peerHover { display: none !important; } }
+
+/* Rich 3-tab car & engine showcase beside the inspected car */
+#inspect { width: min(390px, 44vw); }
+#inspect .in-card {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 82px);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  border-color: rgba(76, 195, 255, 0.28);
+}
+.in-title { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 15px; }
+.in-x { padding: 3px 9px; font-size: 12px; }
+.in-car-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.in-car-txt b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.in-car-txt small { font-size: 11px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#inspect .in-stats { grid-template-columns: repeat(4, 1fr); gap: 5px; }
+#inspect .in-stats div { padding: 5px 4px; }
+#inspect .in-stats b { font-size: 16px; }
+#inspect .in-stats small { font-size: 10px; }
+.in-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 8px 0 6px; }
+.in-tabs button { padding: 5px 6px; font-size: 12px; border-radius: 8px; }
+.in-body {
+  overflow-y: auto;
+  max-height: min(40vh, 300px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+.in-body::-webkit-scrollbar { width: 5px; }
+.in-body::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+.in-eng {
+  background: linear-gradient(135deg, rgba(255, 176, 46, 0.1), rgba(76, 195, 255, 0.08));
+  border: 1px solid rgba(255, 176, 46, 0.28);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.in-eng-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 13px; margin-bottom: 6px; }
+.in-swap { background: rgba(255, 106, 28, 0.26); border: 1px solid rgba(255, 106, 28, 0.55); color: #ffd4ba; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 999px; white-space: nowrap; }
+.in-stock-tag { background: rgba(76, 195, 255, 0.16); border: 1px solid rgba(76, 195, 255, 0.35); color: #bae6fd; font-size: 10px; padding: 1px 6px; border-radius: 999px; white-space: nowrap; }
+.in-eng-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; font-size: 11.5px; color: #b8c4d8; }
+.in-eng-grid b { color: #fff; }
+.in-lines { font-size: 11.5px; color: #c9d2e2; line-height: 1.55; background: rgba(255, 255, 255, 0.03); border-radius: 9px; padding: 6px 9px; }
+.in-mods { display: flex; flex-wrap: wrap; gap: 4px; }
+.in-mods span { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 7px; padding: 3px 7px; font-size: 11px; color: #d5deed; }
+.in-mods span b { color: #86efac; }
+.in-mods .none { color: var(--mute); font-style: italic; }
+
+.vs-head { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; background: rgba(255, 255, 255, 0.04); border-radius: 10px; padding: 7px 9px; font-size: 11.5px; }
+.vs-head > div { display: flex; flex-direction: column; min-width: 0; }
+.vs-head > div.r { text-align: right; }
+.vs-head small { color: var(--mute); font-size: 10px; }
+.vs-head b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-head span { color: #fbbf24; font-size: 11px; }
+.vs-head em { font-style: italic; font-weight: 900; color: var(--hot); font-size: 15px; }
+.in-vs-row { font-size: 11.5px; }
+.vs-top { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; margin-bottom: 3px; }
+.vs-top label { color: var(--mute); font-size: 11px; }
+.vs-top .vs-m { text-align: right; }
+.in-vs-row.peer .vs-p { color: #fbbf24; font-weight: 700; }
+.in-vs-row.me .vs-m { color: #4cc3ff; font-weight: 700; }
+.vs-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.vs-bars > div { height: 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; display: flex; }
+.vs-bars .b-p { justify-content: flex-end; }
+.vs-bars .b-p i { display: block; height: 100%; background: linear-gradient(90deg, #f59e0b, #ff4f6d); border-radius: 4px; }
+.vs-bars .b-m i { display: block; height: 100%; background: linear-gradient(90deg, #38bdf8, #36ff8a); border-radius: 4px; }
+
+.in-prof-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
+.in-prof-grid div { background: rgba(255, 255, 255, 0.04); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; display: flex; flex-direction: column; }
+.in-prof-grid b { font-size: 14px; }
+.in-prof-grid small { font-size: 10.5px; color: var(--mute); }
+.in-best { display: grid; gap: 4px; font-size: 12px; }
+.in-best div { display: flex; justify-content: space-between; background: rgba(255, 255, 255, 0.03); border-radius: 7px; padding: 4px 8px; }
+.in-best b { font-family: monospace; color: #bae6fd; }
+
+.in-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.in-actions button { flex: 1 1 auto; padding: 6px 8px; font-size: 12px; font-weight: 600; }
+.in-actions button.duel { background: linear-gradient(135deg, #ff4f6d, #ff7a1c); border-color: rgba(255, 130, 80, 0.7); color: #fff; font-weight: 700; }
+
+/* Challenger vs Rival comparison & quick duel preset inside Race Setup */
+.rs-duel { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+.rs-peek { padding: 4px 9px; font-size: 11.5px; background: rgba(76, 195, 255, 0.16); border-color: rgba(76, 195, 255, 0.45); color: #d8f2ff; white-space: nowrap; }
+.rs-vs {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+}
+.rv-col { display: flex; flex-direction: column; min-width: 0; }
+.rv-col.r { text-align: right; }
+.rv-col small { font-size: 10.5px; color: var(--mute); }
+.rv-col b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rv-col span { font-size: 11.5px; color: #cbd5e1; }
+.rv-col i { font-style: normal; font-weight: 800; }
+.rs-vs em { font-style: italic; font-weight: 900; color: var(--hot); font-size: 16px; }
+.rs-preset { width: 100%; margin-bottom: 8px; text-align: left; font-size: 12px; font-weight: 600; background: rgba(255, 176, 46, 0.1); border-color: rgba(255, 176, 46, 0.4); color: #fde68a; }
+.rs-preset.on { background: linear-gradient(135deg, rgba(255, 106, 28, 0.32), rgba(255, 194, 58, 0.24)); border-color: var(--gold); color: #fff; }
+
+/* Explicit 1v1 duel cards, car specs & distance gaps */
+#cardStack .lb b { grid-column: 1 / -1; padding-right: 18px; font-size: 12.5px; }
+#cardStack .lb small { grid-column: 1 / -1; }
+#cardStack .lb .lb-spec { font-size: 11px; color: #fde68a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cardStack .lb .lb-btns { grid-column: 1 / -1; grid-row: auto; display: flex; gap: 6px; margin-top: 2px; }
+#cardStack .lb .lb-btns button { grid-column: auto; grid-row: auto; flex: 1; padding: 5px 8px; font-size: 12px; }
+#cardStack .lb.duel {
+  background: linear-gradient(135deg, rgba(112, 14, 34, 0.94), rgba(52, 8, 22, 0.92));
+  border-color: #ff6a1c;
+  box-shadow: 0 4px 18px rgba(255, 79, 109, 0.38);
+}
+
+.rh-gap { font-weight: 700; font-size: 11px; margin-left: 4px; }
+.rh-gap.ahead { color: #ff8093; }
+.rh-gap.behind { color: #61e294; }
+.rr-spec { display: block; color: var(--mute); font-size: 11px; margin-top: 1px; }
+
+/* World Map interactive peer chips, Social & Online list specs */
+.wm-quick button.p { border-color: rgba(255, 176, 46, 0.55); color: #fde68a; background: rgba(255, 176, 46, 0.1); }
+.wm-quick button.p:hover { background: rgba(255, 176, 46, 0.25); }
+.so-car { display: block; font-size: 11px; color: #c7d4e6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.so-acts { display: flex; gap: 3px; flex-wrap: nowrap; flex-shrink: 0; }
+.ob-pname.clickable { cursor: pointer; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; transition: background .15s; }
+.ob-pname.clickable:hover { background: rgba(76, 195, 255, 0.14); }
+.ob-cls { font-size: 11px; font-weight: 800; margin-left: 4px; }
+.ob-spec { color: #cbd5e1 !important; font-size: 11px; }
+
+@media (max-width: 820px), (pointer: coarse) {
+  #inspect { left: 8px; right: 8px; top: auto; bottom: 8px; width: auto; }
+  #inspect .in-card { max-height: 58vh; }
+  .in-body { max-height: 26vh; }
+  #cardStack { max-height: 152px; }
+}
+@media (max-width: 440px) {
+  #inspect .in-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+
 
 
 

@@ -4,10 +4,17 @@
 import * as THREE from 'three';
 import { GARAGES, GARAGE_RADIUS } from './places.js';
 import { fmtTime } from './race.js';
+import { carShowcaseSummary } from './engine.js';
+import { GENERATIONS } from './catalog.js';
 
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const baht = (n) => '฿' + Math.round(n || 0).toLocaleString();
-const TRACK_NAMES = { touge: '⛰️ เขาใหญ่ Touge', city: '🏙️ ถนนพระราม 9 · อโศก', ring: '🛣️ ทางด่วนศรีรัช · มอเตอร์เวย์' };
+const TRACK_NAMES = {
+  sprint: '⚡ สตรีทสปรินท์ ดินแดง-อโศก',
+  touge: '⛰️ เขาใหญ่ Touge',
+  city: '🏙️ ถนนพระราม 9 · อโศก',
+  ring: '🛣️ ทางด่วนศรีรัช · มอเตอร์เวย์',
+};
 
 function labelSprite(text, color = '#fff', bg = 'rgba(8,10,14,0.72)') {
   const c = document.createElement('canvas'); c.width = 512; c.height = 96;
@@ -54,6 +61,7 @@ export class GameWorld {
     this.pending = new Set();
     this.dismissedLobbies = new Set();
     this.prompt = null; this.lobbyMine = null;
+    this._mapPeers = []; this._mapPins = []; this._mapHoverKey = null; this._mapTimer = null; this._mapDefaultInfo = '';
     this.$ = (id) => document.getElementById(id);
     this.ui();
     online.on((ev) => this.onNet(ev));
@@ -75,26 +83,90 @@ export class GameWorld {
     $('worldMap').onclick = (e) => { if (e.target.id === 'worldMap' || e.target.classList.contains('wm-x')) this.toggleMap(false); };
     const cv = $('wmCanvas');
     cv.addEventListener('mousemove', (e) => {
-      const hit = this._hitMapPin(e);
+      const hit = this._hitMapTarget(e);
       cv.style.cursor = hit ? 'pointer' : 'default';
+      this._showMapHover(hit);
+    });
+    cv.addEventListener('mouseleave', () => {
+      cv.style.cursor = 'default';
+      this._showMapHover(null);
     });
     cv.addEventListener('click', (e) => {
-      const hit = this._hitMapPin(e);
-      if (hit) this._warpToMarker(hit);
+      const hit = this._hitMapTarget(e);
+      if (!hit) return;
+      if (hit.kind === 'peer') {
+        this.toggleMap(false);
+        this.hooks.inspectPeer?.(hit.p);
+      } else if (hit.kind === 'pin') {
+        this._warpToMarker(hit.m);
+      }
+    });
+    cv.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const hit = this._hitMapTarget(e);
+      if (hit?.kind === 'peer') {
+        this.toggleMap(false);
+        this.hooks.inspectPeer?.(hit.p);
+      }
     });
     $('profile').onclick = (e) => { if (e.target.id === 'profile' || e.target.classList.contains('wm-x')) $('profile').hidden = true; };
     this.updateWallet();
   }
-  _hitMapPin(e) {
-    if (!this._mapPins?.length) return null;
-    const cv = this.$('wmCanvas'), r = cv.getBoundingClientRect();
-    const cx = (e.clientX - r.left) * (cv.width / r.width), cy = (e.clientY - r.top) * (cv.height / r.height);
-    let best = null, bd = 24 * 24;
-    for (const pin of this._mapPins) {
-      const d = (pin.cx - cx) ** 2 + (pin.cy - cy) ** 2;
-      if (d < bd) { bd = d; best = pin.m; }
+  _peerSpecLine(p) {
+    const b = p?.car?.b || p?.build;
+    if (!b) return '';
+    try {
+      const g = GENERATIONS.find((x) => x.id === b.gen);
+      const sc = carShowcaseSummary(b, g);
+      return `${sc.carName} · ${sc.cc.toLocaleString()} cc · ${sc.hp} HP (${sc.cls}${sc.pi})`;
+    } catch { return ''; }
+  }
+  _showMapHover(hit) {
+    const infoEl = this.$('wmInfo');
+    if (!infoEl) return;
+    if (!hit) {
+      if (this._mapHoverKey !== null) {
+        this._mapHoverKey = null;
+        this._hoveredPeerId = null;
+        infoEl.innerHTML = this._mapDefaultInfo;
+      }
+      return;
     }
-    return best;
+    if (hit.kind === 'peer') {
+      const p = hit.p;
+      this._mapHoverKey = 'p:' + p.id;
+      this._hoveredPeerId = p.id;
+      const crew = p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : '';
+      const spec = this._peerSpecLine(p);
+      infoEl.innerHTML = `🟠 ${crew}<b>${esc(p.name)}</b>${spec ? ` · ${esc(spec)}` : ''} · <i>คลิกซ้าย/ขวา ดูโปรไฟล์รถ &amp; ท้าแข่ง</i>`;
+      return;
+    }
+    this._hoveredPeerId = null;
+    this._mapHoverKey = 'm:' + hit.m.id;
+    const icon = hit.m.kind === 'race' ? '🏁' : hit.m.hidden ? '🗝️' : '🔧';
+    infoEl.innerHTML = `${icon} <b>${esc(hit.m.name)}</b>${hit.m.desc ? ` · ${esc(hit.m.desc)}` : ''} · <i>คลิกเพื่อวาร์ปทันที</i>`;
+  }
+  _hitMapTarget(e) {
+    const cv = this.$('wmCanvas'), r = cv.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const cx = (e.clientX - r.left) * (cv.width / r.width), cy = (e.clientY - r.top) * (cv.height / r.height);
+    if (this._mapPeers?.length) {
+      let bestP = null, bd = 20 * 20;
+      for (const item of this._mapPeers) {
+        const d = (item.cx - cx) ** 2 + (item.cy - cy) ** 2;
+        if (d < bd) { bd = d; bestP = item.p; }
+      }
+      if (bestP) return { kind: 'peer', p: bestP };
+    }
+    if (this._mapPins?.length) {
+      let bestM = null, bd = 24 * 24;
+      for (const pin of this._mapPins) {
+        const d = (pin.cx - cx) ** 2 + (pin.cy - cy) ** 2;
+        if (d < bd) { bd = d; bestM = pin.m; }
+      }
+      if (bestM) return { kind: 'pin', m: bestM };
+    }
+    return null;
   }
   _warpToMarker(m) {
     if (this.race.active) { this.toast('ออกจากการแข่งก่อนวาร์ป'); return; }
@@ -161,9 +233,20 @@ export class GameWorld {
     if (ev.invite) {
       const d = ev.invite;
       this.lastInvite = d.id;
-      if (d.to === this.online.myId) this.feed(`⚔️ <b>${esc(d.host)}</b> ท้าแข่งคุณ! ${TRACK_NAMES[d.track] || d.track} — กด <kbd>J</kbd> รับคำท้า`, 'invite duel');
-      else this.feed(`🏁 <b>${esc(d.host)}</b> เปิดแข่ง ${TRACK_NAMES[d.track] || d.track} — กด <kbd>J</kbd> เข้าร่วม`, 'invite');
+      const sp = d.hostSpec ? ` <small>(${esc(d.hostSpec.carName)} · ${d.hostSpec.cc.toLocaleString()}cc · ${d.hostSpec.hp}HP)</small>` : '';
+      if (d.to === this.online.myId) this.feed(`⚔️ <b>${esc(d.host)}</b> ท้าดวลคุณ!${sp} ${TRACK_NAMES[d.track] || d.track} — กด <kbd>J</kbd> รับคำท้า`, 'invite duel');
+      else this.feed(`🏁 <b>${esc(d.host)}</b> เปิดแข่ง${sp} ${TRACK_NAMES[d.track] || d.track} — กด <kbd>J</kbd> เข้าร่วม`, 'invite');
       this.sound('ping');
+    }
+    if (ev.raceAccepted) {
+      const d = ev.raceAccepted;
+      this.feed(`⚔️ <b>${esc(d.by)}</b> รับคำท้าดวลแล้ว! ออกตัวใน ${Math.max(1, Math.round((d.inMs || 2500) / 1000))} วิ`, 'gold');
+      this.sound('big');
+    }
+    if (ev.raceDeclined) {
+      const d = ev.raceDeclined;
+      this.toast(`❌ ${d.by} ปฏิเสธคำท้าแข่ง`);
+      this.feed(`❌ <b>${esc(d.by)}</b> ปฏิเสธคำท้าแข่ง ${TRACK_NAMES[d.track] || d.track}`);
     }
   }
 
@@ -330,14 +413,28 @@ export class GameWorld {
     const visible = list.filter((l) => l.ids.includes(myId) || !this.dismissedLobbies.has(l.id));
     box.innerHTML = visible.map((l) => {
       const mine = l.ids.includes(myId);
-      return `<div class="lb ${mine ? 'mine' : ''}" data-id="${l.id}"><b>${TRACK_NAMES[l.track] || l.track}</b> · ${l.laps} รอบ${mine ? '' : '<button type="button" class="lb-x" data-a="dismiss" aria-label="ซ่อน">✕</button>'}<small>${esc(l.host)} · ${l.members.length} คน · <span class="lt" data-ms="${l.startsIn}">${Math.ceil(l.startsIn / 1000)}</span> วิ</small>
-        ${mine ? `${l.hostId === myId ? '<button data-a="go" class="on">เริ่มเลย</button>' : ''}<button data-a="leave">ออก</button>` : '<button data-a="join" class="on">เข้าร่วม (J)</button>'}</div>`;
+      const isDuel = l.toId === myId && !mine;
+      const spec = l.hostSpec ? `${esc(l.hostSpec.carName)} · ${l.hostSpec.cc.toLocaleString()}cc · ${l.hostSpec.hp}HP (${esc(l.hostSpec.cls)}${l.hostSpec.pi})` : '';
+      const waitRival = mine && l.hostId === myId && l.toName && l.members.length < 2 ? ` · รอ ${esc(l.toName)} ตอบรับ` : '';
+      const btns = mine
+        ? `<div class="lb-btns">${l.hostId === myId ? '<button data-a="go" class="on">เริ่มเลย</button>' : ''}<button data-a="leave">ออก</button></div>`
+        : isDuel
+          ? `<div class="lb-btns"><button data-a="join" class="on">⚔️ รับคำท้า (J)</button><button data-a="decline">✖ ปฏิเสธ</button></div>`
+          : `<div class="lb-btns"><button data-a="join" class="on">เข้าร่วม (J)</button></div>`;
+      return `<div class="lb ${mine ? 'mine' : ''} ${isDuel ? 'duel' : ''}" data-id="${l.id}">
+        <b>${isDuel ? '⚔️ คำท้า 1v1: ' : ''}${TRACK_NAMES[l.track] || l.track}</b>
+        ${mine ? '' : '<button type="button" class="lb-x" data-a="dismiss" aria-label="ซ่อน">✕</button>'}
+        ${spec ? `<small class="lb-spec">${spec}</small>` : ''}
+        <small>${esc(l.host)} · ${l.laps} รอบ · ${l.members.length} คน · <span class="lt" data-ms="${l.startsIn}">${Math.ceil(l.startsIn / 1000)}</span> วิ${waitRival}</small>
+        ${btns}
+      </div>`;
     }).join('');
     box.querySelectorAll('.lb button').forEach((b) => {
       const id = b.closest('.lb').dataset.id;
       b.onclick = async () => {
         if (b.dataset.a === 'dismiss') { this.dismissedLobbies.add(id); this.renderLobbies(); return; }
         if (b.dataset.a === 'join') { const r = await this.online.raceJoin(id); if (!r.ok) this.toast(r.err); else this.toast('เข้าร่วมแล้ว — รอเริ่มแข่ง'); }
+        if (b.dataset.a === 'decline') { await this.online.raceDecline(id); this.dismissedLobbies.add(id); this.renderLobbies(); this.toast('ปฏิเสธคำท้าแล้ว'); }
         if (b.dataset.a === 'leave') this.online.raceLeave();
         if (b.dataset.a === 'go') this.online.raceGo();
       };
@@ -351,8 +448,11 @@ export class GameWorld {
   }
   async joinLatest() {
     if (this.hooks.chased?.()) { this.toast('🚨 หนีตำรวจให้หลุดก่อน'); return; }
-    const inv = this.lastInvite && (this.online.lobbies || []).find((x) => x.id === this.lastInvite);
-    const l = inv || (this.online.lobbies || []).find((x) => !x.ids.includes(this.online.myId));
+    const lobbies = this.online.lobbies || [];
+    const myId = this.online.myId;
+    const duel = lobbies.find((x) => x.toId === myId && !x.ids.includes(myId));
+    const inv = this.lastInvite && lobbies.find((x) => x.id === this.lastInvite && !x.ids.includes(myId));
+    const l = duel || inv || lobbies.find((x) => !x.ids.includes(myId));
     if (!l) return;
     const r = await this.online.raceJoin(l.id);
     this.toast(r.ok ? 'เข้าร่วมแล้ว — รอเริ่มแข่ง' : r.err);
@@ -363,7 +463,17 @@ export class GameWorld {
     const el = this.$('worldMap');
     const show = v ?? el.hidden;
     el.hidden = !show;
-    if (show) this.drawMap();
+    clearInterval(this._mapTimer);
+    this._mapTimer = null;
+    if (show) {
+      this._mapHoverKey = null;
+      this._hoveredPeerId = null;
+      this.drawMap();
+      this._mapTimer = setInterval(() => {
+        if (!el.hidden) this.drawMap();
+        else { clearInterval(this._mapTimer); this._mapTimer = null; }
+      }, 250);
+    }
   }
   drawMap() {
     const mm = this.hooks.minimap();
@@ -397,7 +507,43 @@ export class GameWorld {
       g.fillStyle = '#fff';
       g.fillText(lbl, x, y + 26);
     }
-    for (const p of this.online.peers.values()) if (p.pose) { const [x, y] = P(p.pose.x, p.pose.z); g.fillStyle = '#ffb02e'; g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.fill(); g.fillStyle = '#fff'; g.font = '600 13px Kanit'; g.fillText(p.name, x, y - 14); }
+    this._mapPeers = [];
+    for (const p of this.online.peers.values()) {
+      if (!p.pose) continue;
+      const [x, y] = P(p.pose.x, p.pose.z);
+      this._mapPeers.push({ cx: x, cy: y, p });
+      const hovered = this._hoveredPeerId === p.id;
+      g.save();
+      g.fillStyle = p.inRace ? '#ff4f6d' : '#ffb02e';
+      g.strokeStyle = hovered ? '#4cc3ff' : '#ffffff';
+      g.lineWidth = hovered ? 4 : 2.5;
+      g.beginPath(); g.arc(x, y, hovered ? 12 : 10, 0, Math.PI * 2); g.fill(); g.stroke();
+      const tagTxt = p.crew ? `[${p.crew}] ${p.name}` : p.name;
+      g.font = '700 13px Kanit, sans-serif';
+      const b = p.car?.b || p.build;
+      let subTxt = '';
+      if (b) {
+        try {
+          const gg = GENERATIONS.find((xx) => xx.id === b.gen);
+          const sc = carShowcaseSummary(b, gg);
+          subTxt = `${sc.cc.toLocaleString()}cc · ${sc.hp}HP`;
+        } catch {}
+      }
+      const tw = Math.max(g.measureText(tagTxt).width, subTxt ? g.measureText(subTxt).width * 0.85 : 0) + 14;
+      const bh = subTxt ? 34 : 20;
+      g.fillStyle = 'rgba(8,10,16,0.86)';
+      g.beginPath(); g.roundRect(x - tw / 2, y - bh - 12, tw, bh, 6); g.fill();
+      g.strokeStyle = hovered ? '#4cc3ff' : 'rgba(255,176,46,0.55)';
+      g.lineWidth = 1.2; g.stroke();
+      g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(tagTxt, x, y - bh - 2);
+      if (subTxt) {
+        g.font = '600 11px Kanit, sans-serif';
+        g.fillStyle = '#fbbf24';
+        g.fillText(subTxt, x, y - bh + 13);
+      }
+      g.restore();
+    }
     const me = this.driver.pos;
     const [mx, my] = P(me.x, me.z);
     g.save(); g.translate(mx, my); g.rotate(-this.driver.heading + Math.PI / 2);
@@ -405,18 +551,33 @@ export class GameWorld {
     g.restore();
     const qb = this.$('wmQuick');
     if (qb) {
-      qb.innerHTML = '';
-      for (const m of this.markers) {
-        if (m.kind !== 'race' && !m.found) continue;
-        const btn = document.createElement('button');
-        btn.className = m.kind === 'race' ? 'r' : 'g';
-        btn.textContent = (m.kind === 'race' ? '🏁 ' : '🔧 ') + m.name.replace(/\s*\(.*?\)/g, '');
-        btn.onclick = () => this._warpToMarker(m);
-        qb.append(btn);
+      const mList = this.markers.filter((m) => m.kind === 'race' || m.found);
+      const pList = [...this.online.peers.values()].filter((p) => !!p.build || !!p.car?.b);
+      const qKey = mList.map((m) => m.id).join(',') + '|' + pList.map((p) => `${p.id}:${p.inRace ? 1 : 0}:${p.inGarage ? 1 : 0}:${p.crew || ''}:${p.build?.gen || ''}:${p.build?.engine?.swap || ''}:${p.build?.engine?.parts?.turbo || ''}`).join(',');
+      if (qb.dataset.k !== qKey) {
+        qb.dataset.k = qKey;
+        qb.innerHTML = '';
+        for (const m of mList) {
+          const btn = document.createElement('button');
+          btn.className = m.kind === 'race' ? 'r' : 'g';
+          btn.textContent = (m.kind === 'race' ? '🏁 ' : '🔧 ') + m.name.replace(/\s*\(.*?\)/g, '');
+          btn.onclick = () => this._warpToMarker(m);
+          qb.append(btn);
+        }
+        for (const p of pList) {
+          const btn = document.createElement('button');
+          btn.className = 'p';
+          const sp = this._peerSpecLine(p);
+          btn.textContent = `🚗 ${p.crew ? `[${p.crew}] ` : ''}${p.name}` + (sp ? ` (${sp.split(' · ').slice(-2).join(' · ')})` : '');
+          btn.title = 'ดูโปรไฟล์รถ & สเปคเครื่อง';
+          btn.onclick = () => { this.toggleMap(false); this.hooks.inspectPeer?.(p); };
+          qb.append(btn);
+        }
       }
     }
     const found = this.markers.filter((m) => m.kind === 'garage' && m.hidden && m.found).length, hid = this.markers.filter((m) => m.kind === 'garage' && m.hidden).length;
-    this.$('wmInfo').innerHTML = `คลิกไอคอนบนแผนที่หรือปุ่มด้านบนเพื่อวาร์ปทันที · 🟣 อู่ลับที่เจอแล้ว ${found}/${hid} · 🟠 ผู้เล่นอื่น`;
+    this._mapDefaultInfo = `คลิกไอคอนบนแผนที่เพื่อวาร์ปทันที · คลิกซ้าย/ขวาที่จุดผู้เล่น 🟠 เพื่อดูสเปครถ &amp; ท้าแข่ง · 🟣 อู่ลับ ${found}/${hid}`;
+    if (!this._mapHoverKey) this.$('wmInfo').innerHTML = this._mapDefaultInfo;
   }
   async openProfile() {
     const el = this.$('profile');

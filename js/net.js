@@ -45,6 +45,11 @@ export class Online {
     this.peers = new Map(); // id -> { name, build, car, tag, snaps:[{t,s}], gen }
     this.sendT = 0; this.listeners = new Set();
     this._lastEmitAt = 0; this._lastMode = 'garage'; this._kaTimer = null;
+    this._raycaster = new THREE.Raycaster();
+    this._ndc = new THREE.Vector2();
+    this._v3 = new THREE.Vector3();
+    this._camDir = new THREE.Vector3();
+    this.hoverPeerId = null;
     this.name = (() => { try { return localStorage.getItem(NAME_KEY) || ''; } catch { return ''; } })();
   }
 
@@ -90,7 +95,12 @@ export class Online {
       if (p.snaps.length > 30) p.snaps.splice(0, p.snaps.length - 30);
       if (wasGarage !== p.inGarage) this.emitChange('peers');
     });
-    sock.on('build', ({ id, build }) => { const p = this.peers.get(id); if (p) { p.build = build; this.buildPeerCar(p); } });
+    sock.on('build', ({ id, build }) => { const p = this.peers.get(id); if (p) { p.build = build; this.buildPeerCar(p); this.emitChange('peers'); } });
+    sock.on('peer:sync', (d) => {
+      if (!d?.id) return;
+      const p = this.peers.get(d.id);
+      if (p) { Object.assign(p, d); this.emitChange('peers'); }
+    });
     sock.on('crew', ({ id, crew }) => {
       const p = this.peers.get(id);
       if (p) {
@@ -106,6 +116,7 @@ export class Online {
     sock.on('car:act', (d) => {
       const p = this.peers.get(d?.id);
       if (p?.car && d.kind === 'flash') p.car.flashLights();
+      if (p && d.kind === 'rev') p.revT = performance.now() / 1000;
       this.emitChange({ carAct: d });
     });
     sock.on('chat', (m) => this.emitChange({ chat: m }));
@@ -114,6 +125,8 @@ export class Online {
     sock.on('race:result', (d) => this.onRace?.('result', d));
     sock.on('race:lobbies', (l) => { this.lobbies = l; this.emitChange({ lobbies: l }); });
     sock.on('race:invite', (d) => this.emitChange({ invite: d }));
+    sock.on('race:accepted', (d) => this.emitChange({ raceAccepted: d }));
+    sock.on('race:declined', (d) => this.emitChange({ raceDeclined: d }));
     sock.on('cash+', (c) => this.emitChange({ cashAdd: c }));
     sock.on('cops', (d) => this.emitChange({ cops: d }));
     // moved to another world (warp to a friend / joined a party)
@@ -213,10 +226,12 @@ export class Online {
   }
   raceOpen(cfg) { return this.call('race:open', cfg); }
   raceJoin(id) { return this.call('race:join', { id }); }
+  raceDecline(id) { return this.call('race:decline', { id }); }
   raceLeave() { this.sock?.emit('race:leave'); }
   raceGo() { this.sock?.emit('race:go'); }
   async raceFinish(d) { const r = await this.call('race:fin', d); if (r.me) this.setMe(r.me); return r; }
   leader() { return this.call('leader', {}); }
+  peerProfile(id) { return this.call('peer:profile', { id }); }
   // ---- accounts & friends
   async login(username, password) {
     await this.connect();
@@ -268,7 +283,13 @@ export class Online {
     const snaps = (Array.isArray(p.s) && p.s.length === 10)
       ? [{ t: performance.now() / 1000, s: p.s }]
       : [];
-    const peer = { id: p.id, name: p.name, crew: p.crew || null, username: p.username || null, likes: p.likes || 0, rep: p.rep || 0, stuntBest: p.stuntBest || 0, inGarage: !!p.inGarage || (Array.isArray(p.s) && p.s[9] === 0), build: p.build, car: null, tag: nameTag(lbl), snaps, lastSpin: 0 };
+    const peer = {
+      id: p.id, name: p.name, crew: p.crew || null, username: p.username || null,
+      likes: p.likes || 0, rep: p.rep || 0, wins: p.wins || 0, races: p.races || 0,
+      stuntBest: p.stuntBest || 0, stuntTotal: p.stuntTotal || 0, bounty: p.bounty || 0,
+      best: p.best || {}, inGarage: !!p.inGarage || (Array.isArray(p.s) && p.s[9] === 0),
+      inRace: !!p.inRace, build: p.build, car: null, tag: nameTag(lbl), snaps, lastSpin: 0, revT: 0,
+    };
     this.peers.set(p.id, peer);
     this.buildPeerCar(peer);
   }
@@ -338,20 +359,74 @@ export class Online {
       const R = car.tire?.outerR || 0.3;
       car._heave = 0;
       car.animate(L(5), (L(6) * dt) / R, L(7), L(8));
+      if (p.revT && wall - p.revT < 1.25) {
+        const ph = (wall - p.revT) / 1.25;
+        car.chassis.rotation.x += Math.sin(ph * 48) * 0.018 * (1 - ph * 0.7);
+      }
       car.setAutoLights(night > 0.55);
       const decel = b.t > a.t && Math.abs(A[6]) > 1.2 && Math.abs(B[6]) < Math.abs(A[6]) - 0.15;
       car.setDriveLights(decel);
       // distance-culled non-obstructive nameTag
       const dist = Math.hypot(x - myPos.x, z - myPos.z);
-      const showTag = dist < 95 && this.inspectingId !== p.id;
+      const isHover = this.hoverPeerId === p.id;
+      const showTag = dist < (isHover ? 140 : 95) && this.inspectingId !== p.id;
       p.tag.visible = showTag;
       if (showTag) {
-        const sc = THREE.MathUtils.clamp(1.65 + dist * 0.032, 1.75, 3.2);
+        const sc = THREE.MathUtils.clamp(1.65 + dist * 0.032, 1.75, 3.2) * (isHover ? 1.15 : 1);
         p.tag.scale.set(sc, sc * (72 / 384), 1);
-        p.tag.material.opacity = dist < 65 ? 0.94 : Math.max(0.05, 1 - (dist - 65) / 30);
+        p.tag.material.opacity = isHover ? 1 : (dist < 65 ? 0.94 : Math.max(0.05, 1 - (dist - 65) / 30));
       }
       p.pose = { x, y, z, h };
     }
+  }
+
+  // Pick a peer driving on the road under screen coordinates (3D raycast + generous moving-car fallback)
+  pickPeer(clientX, clientY, camera, canvas) {
+    if (!this.peers.size || !camera || !canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
+    const sx = clientX - rect.left, sy = clientY - rect.top;
+    this._ndc.set((sx / rect.width) * 2 - 1, -(sy / rect.height) * 2 + 1);
+    this._raycaster.setFromCamera(this._ndc, camera);
+    const rootMap = new Map();
+    const roots = [];
+    for (const p of this.peers.values()) {
+      if (p.car?.root?.visible && p.pose) {
+        rootMap.set(p.car.root, p);
+        roots.push(p.car.root);
+      }
+    }
+    if (!roots.length) return null;
+    const hits = this._raycaster.intersectObjects(roots, true);
+    for (const h of hits) {
+      if (h.distance > 185) break;
+      let o = h.object;
+      while (o) {
+        const peer = rootMap.get(o);
+        if (peer) return peer;
+        o = o.parent;
+      }
+    }
+    camera.getWorldDirection(this._camDir);
+    let best = null, bestDist = Infinity;
+    for (const p of roots.map((r) => rootMap.get(r))) {
+      const q = p.pose;
+      const distCam = Math.hypot(q.x - camera.position.x, q.y - camera.position.y, q.z - camera.position.z);
+      if (distCam > 175) continue;
+      const dx = q.x - camera.position.x, dy = q.y + 0.7 - camera.position.y, dz = q.z - camera.position.z;
+      if (dx * this._camDir.x + dy * this._camDir.y + dz * this._camDir.z <= 0.5) continue;
+      const rPx = THREE.MathUtils.clamp(210 / Math.max(1, distCam), 26, 56);
+      for (const yOff of [0.65, 1.98]) {
+        this._v3.set(q.x, q.y + yOff, q.z).project(camera);
+        if (this._v3.z < -1 || this._v3.z > 1) continue;
+        const px = (this._v3.x * 0.5 + 0.5) * rect.width;
+        const py = (-this._v3.y * 0.5 + 0.5) * rect.height;
+        const dPx = Math.hypot(px - sx, py - sy);
+        if (dPx <= rPx && dPx < bestDist) { bestDist = dPx; best = p; }
+      }
+    }
+    return best;
   }
 
   // push the local player's circle out of other players' cars (same format as Traffic.collide)

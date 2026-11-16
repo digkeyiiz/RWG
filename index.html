@@ -48,6 +48,7 @@
   </div>
   <div id="social" hidden><div class="ob-head"><div class="seg so-tabs"><button data-t="friends">👥 เพื่อน</button><button data-t="party">🎉 ปาร์ตี้</button><button data-t="account">🔑 บัญชี</button></div><button class="so-x" aria-label="ปิด">✕</button></div><div class="so-body"></div></div>
   <div id="inspect" hidden></div>
+  <div id="peerHover" hidden></div>
   <div id="heatHud" hidden></div>
   <div id="skillHud" hidden><div class="sk-top"><span class="sk-lbl"></span><b class="sk-mul">x1.0</b></div><div class="sk-pts">+0</div><div class="sk-bar"><i></i></div></div>
   <div id="prompt" hidden><kbd>E</kbd><span class="pt"></span><button id="promptBtn">แตะ</button></div>
@@ -83,6 +84,7 @@
       <button id="btnChase" class="on">🎥 กล้องตาม</button>
       <button id="btnHorn" title="บีบแตร (H)">📢</button>
       <button id="btnFlash" title="กะพริบไฟ (L)">💡</button>
+      <button id="btnRev" title="เบิ้ลเครื่องอวดเสียง &amp; ไฟท่อ (V)">🔥 เบิ้ล</button>
       <button id="btnResetCar" title="กลับเข้าถนน (R)">↺ กลับถนน</button>
       <button id="btnBackGarage" hidden>🔧 กลับอู่</button>
     </div>
@@ -123,7 +125,7 @@
   <div id="raceSetup" hidden><div class="gfx-card"><div class="gfx-head"><b>🏁 เปิดการแข่งขัน</b><button class="rs-x" aria-label="ปิด">✕</button></div><div class="rs-body"></div></div></div>
   <div id="fps" hidden></div>
 
-  <div id="worldMap" hidden><div class="wm-card"><div class="gfx-head"><b>🗺️ แผนที่เมือง (คลิกจุดบนแผนที่เพื่อวาร์ป)</b><button class="wm-x" aria-label="ปิด">✕</button></div><canvas id="wmCanvas" width="1100" height="720"></canvas><div id="wmQuick" class="wm-quick"></div><p id="wmInfo"></p></div></div>
+  <div id="worldMap" hidden><div class="wm-card"><div class="gfx-head"><b>🗺️ แผนที่เมือง (คลิกจุดเพื่อวาร์ป · คลิกซ้าย/ขวาที่ผู้เล่นเพื่อดูรถ)</b><button class="wm-x" aria-label="ปิด">✕</button></div><canvas id="wmCanvas" width="1100" height="720"></canvas><div id="wmQuick" class="wm-quick"></div><p id="wmInfo"></p></div></div>
   <div id="profile" hidden><div class="gfx-card"><div class="gfx-head"><b>👤 นักซิ่ง</b><button class="wm-x" aria-label="ปิด">✕</button></div><div class="pf-body"></div></div></div>
 
   <div id="rotateHint">📱↻ หมุนจอเป็นแนวนอนเพื่อขับได้ถนัดขึ้น</div>
