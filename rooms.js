@@ -232,7 +232,7 @@ function attachRooms(httpServer) {
           }
           if (value) store.tx(rec.key, 'claim', 0, { value, items: rec.p.owned.length });
         }
-      } else if (rec.p.money < E.START_MONEY) {
+      } else if (!Number.isFinite(rec.p.money) || rec.p.money < E.START_MONEY) {
         rec.p.money = E.START_MONEY;
         store.touch();
       }
@@ -382,12 +382,13 @@ function attachRooms(httpServer) {
     });
 
     sock.on('garage:maxmoney', async (d = {}, cb) => {
-      if (!w || typeof cb !== 'function') return;
-      if (!p.garage) return cb({ ok: false, err: 'กดรับเงินได้เฉพาะในอู่' });
+      if (!w || !p || typeof cb !== 'function') return;
       const E = await eco;
       const target = E.START_MONEY;
-      if (p.prof.money < target) {
-        credit(p, target - p.prof.money, 'garage-grant', { target });
+      const cur = Number.isFinite(p.prof.money) ? p.prof.money : 0;
+      if (cur < target) {
+        p.prof.money = cur;
+        credit(p, target - cur, 'garage-grant', { target });
       }
       cb({ ok: true, money: p.prof.money, me: me(p) });
     });

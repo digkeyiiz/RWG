@@ -1374,6 +1374,7 @@ function frame(now) {
     if (mode === 'city' && driver.vel.length() < 1 && !slotNearClear(driver.pos.x, driver.pos.z)) {
       spawnAt({ x: driver.pos.x, y: driver.y || 0, z: driver.pos.z, heading: driver.heading });
     }
+    if (mode === 'garage') online.garage(inGarage?.id || 'showroom');
     game.updateWallet();
     game.feed(`ยินดีต้อนรับ <b>${online.name}</b> · เงิน ฿${online.me.money.toLocaleString()} · ออนไลน์ ${r.online} คน`);
     if (r.me.races === 0) game.feed('💡 เก็บเหรียญ ฿ ตามถนน · วงฟ้า = อู่ (กด E) · วงม่วง = อู่ลับ · วงแดง = จุดแข่ง · M = แผนที่', 'tip');
@@ -1391,7 +1392,10 @@ function frame(now) {
   }
   ttGo.onclick = () => enterCity(false);
   online.on((ev) => {
-    if (ev?.hello && entered) game.feed('🔄 เชื่อมต่อกลับเข้าเมืองแล้ว');
+    if (ev?.hello && entered) {
+      if (mode === 'garage') online.garage(inGarage?.id || 'showroom');
+      game.feed('🔄 เชื่อมต่อกลับเข้าเมืองแล้ว');
+    }
     if (ev?.kicked) { document.body.classList.add('title'); ttStatus.textContent = '⚠️ บัญชีนี้เข้าเล่นจากที่อื่นแล้ว — รีโหลดหน้าเพื่อเล่นที่นี่'; ttGo.disabled = true; }
     if (ev?.world && entered) game.feed(`🚀 ย้ายไปเมือง ${ev.world.world}`);
   });
