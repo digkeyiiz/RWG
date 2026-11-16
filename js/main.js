@@ -1058,7 +1058,10 @@ function frame(now) {
   });
   const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet });
   online.on((ev) => {
-    if (ev?.carAct?.kind === 'horn') { driver.playHorn(); }
+    if (ev?.carAct?.kind === 'horn' && mode === 'city') {
+      const p = online.peers.get(ev.carAct.id)?.pose;
+      if (!p || Math.hypot(p.x - driver.pos.x, p.z - driver.pos.z) <= 140) driver.playHorn();
+    }
   });
 
   // ---------- instant entry: start straight in the game, connect online in background ----------

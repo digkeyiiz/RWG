@@ -1,6 +1,6 @@
 // Offline cache: precache the app shell, then cache everything same-origin on first use
 // (so .glb models you add are available offline after the first load).
-const CACHE = 'vios-garage-v52';
+const CACHE = 'vios-garage-v53';
 const CORE = [
   './', 'css/style.css', 'manifest.webmanifest',
   'js/main.js', 'js/world.js', 'js/car.js', 'js/fx.js', 'js/kit.js', 'js/icons.js', 'js/thumbs.js', 'js/body.js', 'js/wheels.js', 'js/materials.js', 'js/ui.js', 'js/drive.js', 'js/catalog.js', 'js/glbcar.js', 'js/net.js', 'js/onlineui.js', 'js/engine.js', 'js/garage.js', 'js/settings.js', 'js/race.js', 'js/game.js', 'js/economy.js', 'js/places.js', 'js/police.js', 'js/social.js', 'vendor/socket.io/socket.io.esm.min.js', 'vendor/three-mesh-bvh/index.module.js', 'models/vios-gen2-2007.glb',

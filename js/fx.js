@@ -81,6 +81,11 @@ class SkidMarks {
   }
 
   clearPrev() { this.prev[0] = null; this.prev[1] = null; }
+  clear() {
+    this.pos.fill(0);
+    this.posAttr.needsUpdate = true;
+    this.clearPrev();
+  }
 }
 
 export class CarFX {
@@ -137,6 +142,9 @@ export class CarFX {
     this.skids = new SkidMarks(scene, 320);
     this.skidAcc = 0;
   }
+
+  clearSkids() { this.skids.clear(); }
+  setSkidsVisible(v) { this.skids.mesh.visible = !!v; }
 
   triggerBackfire(strength = 1) {
     this.backfireT = Math.max(this.backfireT, 0.16 * strength);

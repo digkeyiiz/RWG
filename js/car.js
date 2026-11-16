@@ -896,7 +896,7 @@ export class Car {
   }
 
   applyLights() {
-    const l = this.b.lights, m = this.m, on = l.head || !!this.autoLights;
+    const l = this.b.lights, m = this.m, on = this._flashForce != null ? this._flashForce : (l.head || !!this.autoLights);
     m.headLamp.emissiveIntensity = on ? 4 : 0.05;
     m.drl.emissiveIntensity = on ? 3 : 1.2;
     const smoke = l.headTint === 'smoke';
@@ -1016,15 +1016,12 @@ export class Car {
   flashLights() {
     if (this._flashing) return;
     this._flashing = true;
-    const was = !!this.b?.lights?.head;
-    const set = (on) => {
-      this.autoLights = on;
-      this.applyLights();
-    };
-    set(!was);
-    setTimeout(() => set(was), 140);
-    setTimeout(() => set(!was), 280);
-    setTimeout(() => { set(was); this._flashing = false; }, 440);
+    const baseOn = !!(this.b?.lights?.head || this.autoLights);
+    const set = (v) => { this._flashForce = v; this.applyLights(); };
+    set(!baseOn);
+    setTimeout(() => set(baseOn), 140);
+    setTimeout(() => set(!baseOn), 280);
+    setTimeout(() => { set(null); this._flashing = false; }, 440);
   }
 
   // ---------------- add-ons ----------------
