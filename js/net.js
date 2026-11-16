@@ -19,17 +19,20 @@ async function getIO() {
 }
 
 function nameTag(text) {
-  const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+  const c = document.createElement('canvas'); c.width = 384; c.height = 72;
   const g = c.getContext('2d');
-  g.font = '600 56px Kanit, sans-serif';
-  const w = Math.min(500, g.measureText(text).width + 56);
-  g.fillStyle = 'rgba(8,10,14,0.72)';
-  g.beginPath(); g.roundRect((512 - w) / 2, 18, w, 92, 46); g.fill();
+  g.font = '600 32px Kanit, sans-serif';
+  const w = Math.min(368, g.measureText(text).width + 40);
+  g.fillStyle = 'rgba(8,10,14,0.68)';
+  g.beginPath(); g.roundRect((384 - w) / 2, 10, w, 52, 26); g.fill();
+  g.strokeStyle = 'rgba(76,195,255,0.45)';
+  g.lineWidth = 2;
+  g.stroke();
   g.fillStyle = '#ffffff'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillText(text, 256, 66, 470);
+  g.fillText(text, 192, 37, 340);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
-  s.scale.set(0.2, 0.05, 1); s.position.y = 2.1; s.renderOrder = 10;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false, transparent: true, sizeAttenuation: true }));
+  s.scale.set(2.2, 0.41, 1); s.position.y = 1.98; s.renderOrder = 6;
   return s;
 }
 
@@ -41,6 +44,7 @@ export class Online {
     this.sock = null; this.code = null; this.myId = null;
     this.peers = new Map(); // id -> { name, build, car, tag, snaps:[{t,s}], gen }
     this.sendT = 0; this.listeners = new Set();
+    this._lastEmitAt = 0; this._lastMode = 'garage'; this._kaTimer = null;
     this.name = (() => { try { return localStorage.getItem(NAME_KEY) || ''; } catch { return ''; } })();
   }
 
@@ -53,17 +57,38 @@ export class Online {
     try { localStorage.setItem(NAME_KEY, this.name); } catch { /* ignore */ }
   }
 
+  _emitState(inCity, reliable = false) {
+    if (!this.code || !this.sock?.connected) return;
+    this._lastEmitAt = performance.now();
+    const d = this.driver, f = Math.cos(d.heading), z = -Math.sin(d.heading);
+    const vf = d.vel.x * f + d.vel.z * z;
+    const r = (x) => Math.round(x * 1000) / 1000;
+    const payload = [r(d.pos.x), r(d.y || 0), r(d.pos.z), r(d.heading), r(d.slope || 0), r(d.steer), r(vf), r(d.roll), r(d.pitch), inCity ? 1 : 0];
+    if (reliable) this.sock.emit('st', payload);
+    else this.sock.volatile.emit('st', payload);
+  }
+
   async connect() {
     if (this.sock) return this.sock;
     const io = await getIO();
     // polling first, upgrade to WebSocket when the host allows it (Plesk's proxy may not)
     const sock = this.sock = io({ path: '/mp', reconnectionDelayMax: 4000 });
+    if (!this._kaTimer) {
+      this._kaTimer = setInterval(() => {
+        if (this.code && this.sock?.connected && performance.now() - this._lastEmitAt >= 2000) {
+          this._emitState(this._lastMode === 'city', true);
+        }
+      }, 2000);
+    }
     sock.on('peer+', (p) => { this.addPeer(p); this.notify(`🟢 ${p.name} เข้ามาในเมือง`); this.emitChange('peers'); });
     sock.on('peer-', ({ id }) => { const p = this.peers.get(id); if (p) this.notify(`⚪ ${p.name} ออกไปแล้ว`); this.removePeer(id); this.emitChange('peers'); });
     sock.on('st', ({ id, s }) => {
       const p = this.peers.get(id); if (!p) return;
+      const wasGarage = p.inGarage;
+      p.inGarage = s[9] !== 1;
       p.snaps.push({ t: performance.now() / 1000, s });
       if (p.snaps.length > 30) p.snaps.splice(0, p.snaps.length - 30);
+      if (wasGarage !== p.inGarage) this.emitChange('peers');
     });
     sock.on('build', ({ id, build }) => { const p = this.peers.get(id); if (p) { p.build = build; this.buildPeerCar(p); } });
     sock.on('crew', ({ id, crew }) => {
@@ -152,6 +177,7 @@ export class Online {
       this.clearPeers();
       this.code = r.world; this.myId = r.id; this.me = r.me; if (!this.name) this.setName(r.me.name); this.online = r.online; this.lobbies = r.lobbies;
       for (const p of r.players) this.addPeer(p);
+      this._emitState(this._lastMode === 'city', true);
       this.emitChange({ hello: r });
       this.emitChange('status');
       return r;
@@ -171,6 +197,18 @@ export class Online {
   async buy(key) {
     const r = await this.call('buy', { key, rid: Math.random().toString(36).slice(2) + Date.now() });
     if (r.ok && this.me) { this.me.money = r.money; this.me.owned = r.owned; this.emitChange('me'); }
+    return r;
+  }
+  async bankStunt(pts, kind = '') {
+    if (!this.code) return { ok: false };
+    const r = await this.call('stunt:bank', { pts, kind });
+    if (r.me) this.setMe(r.me);
+    return r;
+  }
+  async saveDrag(t100, t402) {
+    if (!this.code) return { ok: false };
+    const r = await this.call('drag:best', { t100, t402 });
+    if (r.me) this.setMe(r.me);
     return r;
   }
   raceOpen(cfg) { return this.call('race:open', cfg); }
@@ -194,6 +232,7 @@ export class Online {
   async answerFriend(username, yes = true) { const r = await this.call('friend:accept', { username, no: !yes }); if (r.me) this.setMe(r.me); return r; }
   async removeFriend(username) { const r = await this.call('friend:remove', { username }); if (r.me) this.setMe(r.me); return r; }
   warp(username) { return this.call('warp', { username }); }
+  warpPeer(id) { return this.call('warp:peer', { id }); }
   pm(username, text) { this.sock?.emit('pm', { username, text }); }
   partyInvite(username) { return this.call('party:invite', { username }); }
   partyJoin(id) { return this.call('party:join', { id }); }
@@ -226,7 +265,10 @@ export class Online {
   addPeer(p) {
     if (this.peers.has(p.id)) this.removePeer(p.id);
     const lbl = p.crew ? `[${p.crew}] ${p.name}` : p.name;
-    const peer = { id: p.id, name: p.name, crew: p.crew || null, username: p.username || null, likes: p.likes || 0, rep: p.rep || 0, build: p.build, car: null, tag: nameTag(lbl), snaps: [], lastSpin: 0 };
+    const snaps = (Array.isArray(p.s) && p.s.length === 10)
+      ? [{ t: performance.now() / 1000, s: p.s }]
+      : [];
+    const peer = { id: p.id, name: p.name, crew: p.crew || null, username: p.username || null, likes: p.likes || 0, rep: p.rep || 0, stuntBest: p.stuntBest || 0, inGarage: !!p.inGarage || (Array.isArray(p.s) && p.s[9] === 0), build: p.build, car: null, tag: nameTag(lbl), snaps, lastSpin: 0 };
     this.peers.set(p.id, peer);
     this.buildPeerCar(peer);
   }
@@ -260,24 +302,24 @@ export class Online {
 
   // called every frame from the main loop
   update(dt, mode, night) {
+    this._lastMode = mode;
     if (!this.code) return;
     const inCity = mode === 'city';
     this.sendT += dt;
     const polling = this.sock?.io?.engine?.transport?.name === 'polling';
     if (this.sendT >= 1 / (polling ? 10 : SEND_HZ) && this.sock?.connected) {
       this.sendT = 0;
-      const d = this.driver, f = Math.cos(d.heading), z = -Math.sin(d.heading);
-      const vf = d.vel.x * f + d.vel.z * z;
-      const r = (x) => Math.round(x * 1000) / 1000;
-      this.sock.volatile.emit('st', [r(d.pos.x), r(d.y || 0), r(d.pos.z), r(d.heading), r(d.slope || 0), r(d.steer), r(vf), r(d.roll), r(d.pitch), inCity ? 1 : 0]);
+      this._emitState(inCity, false);
     }
-    const now = performance.now() / 1000 - (polling ? 0.22 : DELAY);
+    const wall = performance.now() / 1000;
+    const now = wall - (polling ? 0.22 : DELAY);
+    const myPos = this.driver.pos;
     for (const p of this.peers.values()) {
       const car = p.car;
       if (!car) continue;
       const sn = p.snaps;
       const last = sn[sn.length - 1];
-      const visible = inCity && last && last.s[9] === 1 && performance.now() / 1000 - last.t < 5;
+      const visible = inCity && last && last.s[9] === 1 && wall - last.t < 30;
       car.root.visible = !!visible;
       p.pose = null;
       if (!visible) continue;
@@ -297,6 +339,17 @@ export class Online {
       car._heave = 0;
       car.animate(L(5), (L(6) * dt) / R, L(7), L(8));
       car.setAutoLights(night > 0.55);
+      const decel = b.t > a.t && Math.abs(A[6]) > 1.2 && Math.abs(B[6]) < Math.abs(A[6]) - 0.15;
+      car.setDriveLights(decel);
+      // distance-culled non-obstructive nameTag
+      const dist = Math.hypot(x - myPos.x, z - myPos.z);
+      const showTag = dist < 95 && this.inspectingId !== p.id;
+      p.tag.visible = showTag;
+      if (showTag) {
+        const sc = THREE.MathUtils.clamp(1.65 + dist * 0.032, 1.75, 3.2);
+        p.tag.scale.set(sc, sc * (72 / 384), 1);
+        p.tag.material.opacity = dist < 65 ? 0.94 : Math.max(0.05, 1 - (dist - 65) / 30);
+      }
       p.pose = { x, y, z, h };
     }
   }

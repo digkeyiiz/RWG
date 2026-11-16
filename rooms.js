@@ -6,7 +6,7 @@ const { Server } = require('socket.io');
 const { Store } = require('./store');
 const SPOTS = require('./world-spots.json');
 
-const WORLD_CAP = 16;
+const WORLD_CAP = 64;
 const MAX_BUILD_BYTES = 8 * 1024;
 const STATE_LEN = 10;
 const ACTIVE_CASH = 30, ACTIVE_BIG = 3;
@@ -84,9 +84,9 @@ function attachRooms(httpServer) {
     }
     return null;
   }
-  const pubPlayer = (p) => ({ id: p.id, name: p.name, crew: p.prof.crew || null, username: p.prof.username || null, build: p.build, rep: p.prof.rep, likes: p.prof.likes || 0 });
+  const pubPlayer = (p) => ({ id: p.id, name: p.name, crew: p.prof.crew || null, username: p.prof.username || null, build: p.build, rep: p.prof.rep, likes: p.prof.likes || 0, stuntBest: p.prof.stuntBest || 0, inGarage: !!p.garage, s: p.lastS || null });
   const lobbyList = (w) => [...w.lobbies.values()].map((l) => ({ id: l.id, track: l.track, laps: l.laps, host: l.hostName, hostId: l.host, ids: [...l.members], members: [...l.members].map((sid) => w.players.get(sid)?.name).filter(Boolean), startsIn: Math.max(0, l.t - Date.now()) }));
-  const me = (p) => ({ username: p.prof.username || null, crew: p.prof.crew || null, likes: p.prof.likes || 0, friends: (p.prof.friends || []).map(uname).filter(Boolean), requests: (p.prof.freq || []).map(uname).filter(Boolean), money: p.prof.money, rep: p.prof.rep, owned: p.prof.owned, discovered: p.prof.discovered, races: p.prof.races, wins: p.prof.wins, best: p.prof.best, name: p.prof.name, bounty: p.prof.bounty || 0, escapes: p.prof.escapes || 0, busted: p.prof.busted || 0 });
+  const me = (p) => ({ username: p.prof.username || null, crew: p.prof.crew || null, likes: p.prof.likes || 0, friends: (p.prof.friends || []).map(uname).filter(Boolean), requests: (p.prof.freq || []).map(uname).filter(Boolean), money: p.prof.money, rep: p.prof.rep, owned: p.prof.owned, discovered: p.prof.discovered, races: p.prof.races, wins: p.prof.wins, best: p.prof.best, stuntBest: p.prof.stuntBest || 0, stuntTotal: p.prof.stuntTotal || 0, name: p.prof.name, bounty: p.prof.bounty || 0, escapes: p.prof.escapes || 0, busted: p.prof.busted || 0 });
 
   // remove anything a build uses that this player doesn't own (others see what you really own)
   async function sanitize(p, build) {
@@ -185,7 +185,7 @@ function attachRooms(httpServer) {
       // a party member joins the leader's world
       const pt = partyOf(rec.key), lead = pt && presence.get(pt.leader);
       w = lead?.w && worlds.has(lead.w.id) && lead.w.players.size < WORLD_CAP + 4 ? lead.w : pickWorld();
-      p = { id: sock.id, key: rec.key, prof: rec.p, name: rec.p.name, build, pose: null, raceId: null, garage: null, lastSoloPrize: 0, w };
+      p = { id: sock.id, key: rec.key, prof: rec.p, name: rec.p.name, build, pose: null, lastS: null, raceId: null, garage: null, lastSoloPrize: 0, lastStuntAt: 0, stuntMinAt: 0, stuntMinPts: 0, w };
       presence.set(rec.key, p);
       for (const fk of rec.p.friends || []) sendTo(fk, 'friend:online', { username: rec.p.username, name: rec.p.name, online: true });
       const fixed = await sanitize(p, build);
@@ -200,6 +200,7 @@ function attachRooms(httpServer) {
 
     const leave = () => {
       if (!w || !p) return;
+      const oldW = w;
       if (presence.get(p.key) === p) {
         presence.delete(p.key);
         for (const fk of p.prof.friends || []) sendTo(fk, 'friend:online', { username: p.prof.username, name: p.name, online: false });
@@ -214,6 +215,10 @@ function attachRooms(httpServer) {
       log('leave', w.id, p.name, `(${w.players.size} left)`);
       store.touch();
       sock.leave(w.id);
+      if (oldW.players.size === 0 && worlds.size > 1) {
+        worlds.delete(oldW.id);
+        log('world close', oldW.id);
+      }
       w = null; p = null;
     };
 
@@ -221,6 +226,7 @@ function attachRooms(httpServer) {
       if (!w || stateBudget-- <= 0) return;
       const v = cleanState(s);
       if (!v) return;
+      p.lastS = v;
       p.pose = { x: v[0], y: v[1], z: v[2], t: Date.now() };
       sock.volatile.to(w.id).emit('st', { id: sock.id, s: v });
     });
@@ -270,19 +276,27 @@ function attachRooms(httpServer) {
       cb({ ok: true, v: c.v, money: p.prof.money });
       io.to(w.id).emit('cash-', { id: c.id, by: sock.id, name: p.name, v: c.v, big: c.big });
       const ww = w;
-      setTimeout(() => { const n = spawnCash(ww, c.big); if (n) io.to(ww.id).emit('cash+', n); }, c.big ? 90000 : 12000);
+      setTimeout(() => { if (!worlds.has(ww.id)) return; const n = spawnCash(ww, c.big); if (n) io.to(ww.id).emit('cash+', n); }, c.big ? 90000 : 12000).unref?.();
     });
 
     // ---- garages: enter (validated by position), discovery bonus, purchases only inside
     sock.on('garage', async (d = {}, cb) => {
       if (!w || typeof cb !== 'function') return;
       const P = await plc, E = await eco;
-      if (d.id === null) { p.garage = null; return cb({ ok: true }); }
-      if (d.id === 'showroom') { p.garage = 'showroom'; return cb({ ok: true, bonus: 0, me: me(p) }); }
+      if (d.id === null) {
+        p.garage = null;
+        if (p.lastS) { p.lastS = [...p.lastS]; p.lastS[9] = 1; }
+        return cb({ ok: true });
+      }
+      const markInGarage = () => {
+        if (p.lastS) { p.lastS = [...p.lastS]; p.lastS[9] = 0; sock.to(w.id).emit('st', { id: sock.id, s: p.lastS }); }
+      };
+      if (d.id === 'showroom') { p.garage = 'showroom'; markInGarage(); return cb({ ok: true, bonus: 0, me: me(p) }); }
       const g = P.garageById(d.id);
       if (!g) return cb({ ok: false });
       if (!p.pose || Date.now() - p.pose.t > 3000 || Math.hypot(p.pose.x - g.x, p.pose.z - g.z) > (g.onTouge ? 30 : 22)) return cb({ ok: false, err: 'ไม่ได้อยู่ที่อู่' });
       p.garage = g.id;
+      markInGarage();
       let bonus = 0;
       if (g.hidden && !p.prof.discovered.includes(g.id)) { p.prof.discovered.push(g.id); bonus = E.GARAGE_DISCOVERY; credit(p, bonus, 'discover', { g: g.id }); }
       cb({ ok: true, bonus, me: me(p) });
@@ -472,17 +486,22 @@ function attachRooms(httpServer) {
     // world snapshot after moving between worlds (warp to a friend / party)
     function switchWorld(nw) {
       if (!w || nw === w) return false;
-      w.players.delete(sock.id);
-      for (const l of w.lobbies.values()) { l.members.delete(sock.id); if (l.host === sock.id) w.lobbies.delete(l.id); }
-      sock.to(w.id).emit('peer-', { id: sock.id });
-      io.to(w.id).emit('race:lobbies', lobbyList(w));
-      sock.leave(w.id);
+      const oldW = w;
+      oldW.players.delete(sock.id);
+      for (const l of oldW.lobbies.values()) { l.members.delete(sock.id); if (l.host === sock.id) oldW.lobbies.delete(l.id); }
+      sock.to(oldW.id).emit('peer-', { id: sock.id });
+      io.to(oldW.id).emit('race:lobbies', lobbyList(oldW));
+      sock.leave(oldW.id);
       const others = [...nw.players.values()].map(pubPlayer);
       w = nw; p.w = nw;
       nw.players.set(sock.id, p);
       sock.join(nw.id);
       sock.to(nw.id).emit('peer+', pubPlayer(p));
       sock.emit('world', { world: nw.id, players: others, cash: [...nw.cash.values()].map(({ id, x, y, z, v, big }) => ({ id, x, y, z, v, big })), lobbies: lobbyList(nw) });
+      if (oldW.players.size === 0 && worlds.size > 1) {
+        worlds.delete(oldW.id);
+        log('world close', oldW.id);
+      }
       log('move', p.name, '→', nw.id);
       return true;
     }
@@ -540,7 +559,25 @@ function attachRooms(httpServer) {
       if (p.raceId) return cb({ ok: false, err: 'กำลังแข่งอยู่' });
       if (q.w !== w && q.w.players.size >= WORLD_CAP + 4) return cb({ ok: false, err: 'เมืองของเพื่อนเต็ม' });
       switchWorld(q.w);
-      cb({ ok: true, pose: q.pose ? { x: q.pose.x, y: q.pose.y, z: q.pose.z } : null, id: q.id });
+      cb({ ok: true, pose: q.pose ? { x: q.pose.x, y: q.pose.y, z: q.pose.z, h: q.lastS ? q.lastS[3] : 0 } : null, id: q.id });
+    });
+    // quick warp to any online peer by socket id (no account registration required)
+    sock.on('warp:peer', (d = {}, cb) => {
+      if (typeof cb !== 'function' || noPlayer(cb)) return;
+      if (p.raceId) return cb({ ok: false, err: 'กำลังแข่งอยู่' });
+      const sid = String(d.id || '');
+      let q = w.players.get(sid);
+      if (!q) {
+        for (const wr of worlds.values()) {
+          if (wr.players.has(sid)) { q = wr.players.get(sid); break; }
+        }
+      }
+      if (!q || q === p) return cb({ ok: false, err: 'ผู้เล่นออฟไลน์แล้ว' });
+      if (q.w !== w) {
+        if (q.w.players.size >= WORLD_CAP + 4) return cb({ ok: false, err: 'เมืองนี้เต็มชั่วคราว' });
+        switchWorld(q.w);
+      }
+      cb({ ok: true, id: q.id, name: q.name, inGarage: !!q.garage, pose: q.pose ? { x: q.pose.x, y: q.pose.y, z: q.pose.z, h: q.lastS ? q.lastS[3] : 0 } : null });
     });
     // direct messages (friends) and party chat
     let pmAt = 0;
@@ -573,7 +610,7 @@ function attachRooms(httpServer) {
       const lead = presence.get(pt.leader);
       let pose = null;
       if (lead && lead.w !== w && !p.raceId && lead.w.players.size < WORLD_CAP + 4) { switchWorld(lead.w); }
-      if (lead?.pose) pose = { x: lead.pose.x, y: lead.pose.y, z: lead.pose.z };
+      if (lead?.pose) pose = { x: lead.pose.x, y: lead.pose.y, z: lead.pose.z, h: lead.lastS ? lead.lastS[3] : 0 };
       cb({ ok: true, pose });
     });
     sock.on('party:leave', () => { if (p) leaveParty(p.key); });
@@ -583,6 +620,43 @@ function attachRooms(httpServer) {
       const pt = partyOf(p.key), text = String(t ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 200);
       if (!pt || !text) return;
       for (const k of pt.members) sendTo(k, 'party:chat', { name: p.name, text });
+    });
+    // bank drift / speed / near-miss combo into cash, REP, and stunt leaderboard
+    sock.on('stunt:bank', async (d = {}, cb) => {
+      if (!w || !p || typeof cb !== 'function') return;
+      const now = Date.now();
+      if (p.lastStuntAt && now - p.lastStuntAt < 1200) return cb({ ok: false });
+      if (now - (p.stuntMinAt || 0) > 60000) { p.stuntMinAt = now; p.stuntMinPts = 0; }
+      const pts = Math.min(25000, Math.max(0, Math.round(Number(d.pts) || 0)));
+      if (pts < 150 || p.stuntMinPts + pts > 150000) return cb({ ok: false });
+      const E = await eco;
+      const rw = E.stuntReward(pts);
+      p.lastStuntAt = now;
+      p.stuntMinPts += pts;
+      p.prof.stuntTotal = (p.prof.stuntTotal || 0) + pts;
+      const isBest = pts > (p.prof.stuntBest || 0);
+      if (isBest) p.prof.stuntBest = pts;
+      p.prof.rep += rw.rep;
+      credit(p, rw.cash, 'stunt', { pts, kind: String(d.kind || '').slice(0, 24) });
+      cb({ ok: true, pts, cash: rw.cash, rep: rw.rep, best: isBest, me: me(p) });
+    });
+    // record personal drag test times (0-100 km/h & 402m quarter mile)
+    sock.on('drag:best', (d = {}, cb) => {
+      if (!w || !p || typeof cb !== 'function') return;
+      p.prof.best = p.prof.best || {};
+      let updated = false;
+      const t100 = Number(d.t100);
+      if (Number.isFinite(t100) && t100 >= 1.2 && t100 <= 60) {
+        const v = Math.round(t100 * 100) / 100;
+        if (!(p.prof.best.drag100 <= v)) { p.prof.best.drag100 = v; updated = true; }
+      }
+      const t402 = Number(d.t402);
+      if (Number.isFinite(t402) && t402 >= 5.0 && t402 <= 90) {
+        const v = Math.round(t402 * 100) / 100;
+        if (!(p.prof.best.drag402 <= v)) { p.prof.best.drag402 = v; updated = true; }
+      }
+      if (updated) { p.prof.rep += 15; store.touch(); }
+      cb({ ok: true, updated, rep: updated ? 15 : 0, me: me(p) });
     });
     // likes for a car you saw: once per day per car owner, +5 REP for them
     sock.on('like', (d = {}, cb) => {
@@ -598,7 +672,16 @@ function attachRooms(httpServer) {
       cb({ ok: true, likes: t.prof.likes });
     });
 
-    sock.on('leader', (d, cb) => { if (typeof cb === 'function') cb({ rep: store.leaderboard(), wanted: store.mostWanted() }); });
+    sock.on('leader', (d, cb) => {
+      if (typeof cb === 'function') {
+        cb({
+          rep: store.leaderboard(),
+          stunt: store.stuntLeaderboard(),
+          likes: store.likesLeaderboard(),
+          wanted: store.mostWanted(),
+        });
+      }
+    });
     sock.on('disconnect', () => { clearInterval(refill); leave(); });
   });
 

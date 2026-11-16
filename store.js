@@ -91,6 +91,8 @@ class Store {
       races: 0,
       wins: 0,
       best: {},
+      stuntBest: 0,
+      stuntTotal: 0,
       bounty: 0,
       escapes: 0,
       busted: 0,
@@ -152,16 +154,47 @@ class Store {
 
   leaderboard() {
     return [...this.profiles.values()]
-      .filter((p) => (p.rep || 0) > 0 || (p.races || 0) > 0)
+      .filter((p) => (p.rep || 0) > 0 || (p.races || 0) > 0 || (p.stuntBest || 0) > 0)
       .sort((a, b) => (b.rep || 0) - (a.rep || 0))
       .slice(0, 15)
       .map((p) => ({
         name: p.name,
+        crew: p.crew || null,
         username: p.username || null,
         rep: p.rep || 0,
         wins: p.wins || 0,
         races: p.races || 0,
         likes: p.likes || 0,
+        stuntBest: p.stuntBest || 0,
+      }));
+  }
+
+  stuntLeaderboard() {
+    return [...this.profiles.values()]
+      .filter((p) => (p.stuntBest || 0) > 0 || (p.stuntTotal || 0) > 0)
+      .sort((a, b) => ((b.stuntBest || 0) - (a.stuntBest || 0)) || ((b.stuntTotal || 0) - (a.stuntTotal || 0)))
+      .slice(0, 15)
+      .map((p) => ({
+        name: p.name,
+        crew: p.crew || null,
+        username: p.username || null,
+        stuntBest: p.stuntBest || 0,
+        stuntTotal: p.stuntTotal || 0,
+        rep: p.rep || 0,
+      }));
+  }
+
+  likesLeaderboard() {
+    return [...this.profiles.values()]
+      .filter((p) => (p.likes || 0) > 0)
+      .sort((a, b) => ((b.likes || 0) - (a.likes || 0)) || ((b.rep || 0) - (a.rep || 0)))
+      .slice(0, 15)
+      .map((p) => ({
+        name: p.name,
+        crew: p.crew || null,
+        username: p.username || null,
+        likes: p.likes || 0,
+        rep: p.rep || 0,
       }));
   }
 
@@ -172,6 +205,7 @@ class Store {
       .slice(0, 15)
       .map((p) => ({
         name: p.name,
+        crew: p.crew || null,
         username: p.username || null,
         bounty: p.bounty || 0,
         escapes: p.escapes || 0,

@@ -86,8 +86,8 @@ export class Panel {
     const rt = pf.rating;
     strip.innerHTML = `<span class="ps-cls" style="--pc:${rt.color}">${rt.cls} ${rt.pi}</span>
       <span><b>${Math.round(pf.peakHp)}</b> HP</span>
-      <span>0-100 <b>${sim.t100.toFixed(1)}s</b></span>
-      <span>Top <b>${Math.round(sim.vmax)}</b></span>
+      <span>0-100 <b>${sim.t100 != null ? sim.t100.toFixed(1) + 's' : '—'}</b></span>
+      <span>Top <b>${Math.round(sim.topKmh)}</b></span>
       <button class="ps-test" title="ทดสอบขับ / จับเวลา 0-100 และ 402 ม.">🧪 เทสรถ</button>`;
     strip.querySelector('.ps-test').onclick = () => this.onTestDrive?.();
   }

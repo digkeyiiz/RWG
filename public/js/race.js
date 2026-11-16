@@ -218,14 +218,13 @@ const BOT_NAMES = ['เอก บางนา', 'บอย พระราม9',
 function tag(text, color = '#ffffff') {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
   const g = c.getContext('2d');
-  g.font = '600 30px Kanit, sans-serif';
-  const w = Math.min(250, g.measureText(text).width + 30);
-  g.fillStyle = 'rgba(8,10,14,0.7)'; g.beginPath(); g.roundRect((256 - w) / 2, 8, w, 48, 24); g.fill();
-  g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 33, 236);
+  g.font = '600 28px Kanit, sans-serif';
+  const w = Math.min(248, g.measureText(text).width + 30);
+  g.fillStyle = 'rgba(8,10,14,0.72)'; g.beginPath(); g.roundRect((256 - w) / 2, 10, w, 44, 22); g.fill();
+  g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 128, 33, 232);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  // constant on-screen size (a world-size tag fills the screen when a rival is right behind the camera)
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
-  s.scale.set(0.16, 0.04, 1); s.position.y = 2.0; s.renderOrder = 10;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false, transparent: true, sizeAttenuation: true }));
+  s.scale.set(2.0, 0.5, 1); s.position.y = 1.95; s.renderOrder = 6;
   return s;
 }
 
@@ -236,12 +235,18 @@ export class Race {
     this.tracks = null; this.state = 'idle'; this.bots = []; this.group = new THREE.Group(); scene.add(this.group);
     this.gates = []; this.audio = null; this.peerProg = new Map();
     this.ui();
-    online.on((ev) => { if (ev === 'status' && !online.inRoom && this.active) this.abort('การเชื่อมต่อหลุด — ยกเลิกการแข่ง'); });
+    online.on((ev) => { if (ev === 'status' && !online.inRoom && this.active && this.mp) this.abort('การเชื่อมต่อหลุด — ยกเลิกการแข่ง'); });
     online.onRace = (ev, d) => this.onNet(ev, d);
     try { this.best = JSON.parse(localStorage.getItem(BEST_KEY) || '{}'); } catch { this.best = {}; }
   }
   get active() { return this.state === 'countdown' || this.state === 'racing' || this.state === 'finished'; }
   setWorld(city, touge) { this.tracks = buildTracks(city, touge); this.city = city; }
+  bestOf(id) {
+    const srv = this.online.me?.best?.[id], loc = this.best?.[id];
+    if (srv == null) return loc ?? null;
+    if (loc == null) return srv;
+    return Math.min(srv, loc);
+  }
 
   // ---------------- UI
   ui() {
@@ -261,19 +266,20 @@ export class Race {
     this.target = target;
     const seg = (key, opts) => `<div class="gfx-seg" data-k="${key}">${opts.map(([v, n]) => `<button data-v="${v}" class="${String(o[key]) === String(v) ? 'on' : ''}">${n}</button>`).join('')}</div>`;
     const pi = computePerf(this.getBuild()).rating;
-    const best = this.online.me?.best?.[o.track];
+    const best = this.bestOf(o.track);
     const E = this.econ;
+    const onlineOk = !!this.online.inRoom;
     box.innerHTML = `
       ${target ? `<div class="rs-duel">⚔️ ท้าแข่งกับ <b>${esc(target.name)}</b></div>` : ''}${party ? '<div class="rs-duel">🎉 แข่งกับปาร์ตี้ — ทุกคนในเมืองเดียวกันจะถูกพาเข้าเส้นสตาร์ท</div>' : ''}
       <div class="rs-car">รถของคุณ: <b>${esc(this.getBuild().name)}</b> <span class="cls" style="--pc:${pi.color}">${pi.cls} ${pi.pi}</span></div>
       <label>สนาม</label>
-      <div class="rs-tracks">${['touge', 'city', 'ring'].map((id) => `<button data-track="${id}" class="${o.track === id ? 'on' : ''}"><b>${T[id]?.name || id}</b><small>${T[id]?.desc || ''}</small><i>สถิติคุณ: ${fmt(this.online.me?.best?.[id])}</i></button>`).join('')}</div>
+      <div class="rs-tracks">${['touge', 'city', 'ring'].map((id) => `<button data-track="${id}" class="${o.track === id ? 'on' : ''}"><b>${T[id]?.name || id}</b><small>${T[id]?.desc || ''}</small><i>สถิติคุณ: ${fmt(this.bestOf(id))}</i></button>`).join('')}</div>
       <label>จำนวนรอบ</label>${seg('laps', [[1, '1'], [2, '2'], [3, '3']])}
       <label>บอทร่วมแข่ง</label>${seg('bots', [[0, 'ไม่มี'], [2, '2'], [3, '3'], [5, '5']])}
       <label>ความยากบอท</label>${seg('diff', [[0, 'ง่าย'], [1, 'ปกติ'], [2, 'ยาก'], [3, 'โหด']])}
       <div class="rs-prize">🏆 เงินรางวัลที่ 1: <b>฿${(E ? E.racePrize(o.track, o.laps, 0, 2, o.bots) : 0).toLocaleString()}</b> (แข่งกับคนจริง 2 คน) · กับบอท <b>฿${(E ? E.racePrize(o.track, o.laps, 0, 1, o.bots) : 0).toLocaleString()}</b>${best ? ` · สถิติคุณ ${fmt(best)}` : ''}</div>
-      <div class="rr-btns"><button class="rs-go on" data-now="1">🏁 เริ่มทันที</button><button class="rs-go" data-now="0">📣 เปิดรับคู่แข่ง 20 วิ</button></div>
-      <p class="ob-note">ผู้เล่นทุกคนในเมืองจะเห็นคำเชิญและกดเข้าร่วมได้ · เงินรางวัลตรวจสอบโดยเซิร์ฟเวอร์</p>`;
+      <div class="rr-btns"><button class="rs-go on" data-now="1">🏁 เริ่มทันที</button>${onlineOk ? '<button class="rs-go" data-now="0">📣 เปิดรับคู่แข่ง 20 วิ</button>' : ''}</div>
+      <p class="ob-note">${onlineOk ? 'ผู้เล่นทุกคนในเมืองจะเห็นคำเชิญและกดเข้าร่วมได้ · เงินรางวัลตรวจสอบโดยเซิร์ฟเวอร์' : 'กำลังเล่นแบบออฟไลน์ — แข่งกับบอทและสะสมเงิน/REP ได้ทันที'}</p>`;
     box.querySelectorAll('.rs-tracks button').forEach((b) => { b.onclick = () => { o.track = b.dataset.track; this.saveOpt(); this.openSetup(null, target, party); }; });
     box.querySelectorAll('.gfx-seg').forEach((sg) => sg.querySelectorAll('button').forEach((b) => {
       b.onclick = () => { const v = b.dataset.v; o[sg.dataset.k] = v === 'true' ? true : v === 'false' ? false : +v; this.saveOpt(); this.openSetup(null, target, party); };
@@ -286,6 +292,13 @@ export class Race {
   // ---------------- start: the server runs the lobby and sends race:start to the racers
   async requestStart(now = false) {
     const o = this.opt;
+    if (!this.online.inRoom) {
+      if (this.target) { this.toast('ต้องเชื่อมต่อออนไลน์ก่อนเพื่อท้าแข่งผู้เล่นอื่น'); return; }
+      const seed = Math.floor(Math.random() * 1e9);
+      await this.begin({ track: o.track, laps: o.laps, bots: o.bots, diff: o.diff, traffic: false, seed }, false, null);
+      this.toast('🏁 โหมดออฟไลน์ — แข่งกับบอท');
+      return;
+    }
     const r = await this.online.raceOpen({ track: o.track, laps: o.laps, bots: o.bots, diff: o.diff, now, to: this.target?.id || null, party: !!this.partyMode });
     if (!r?.ok) this.toast(r?.err || 'เปิดแข่งไม่ได้');
     else if (!now) this.toast('📣 เปิดรับคู่แข่งแล้ว — เริ่มใน 20 วินาที');
@@ -336,7 +349,9 @@ export class Race {
         const gen = proto ? proto.gen.id : 'gen2';
         const pool = BOT_NAMES.filter((x) => !this.bots.some((bb) => bb.name.startsWith(x)));
         const name = pool[Math.floor(rand() * pool.length)] + ' 🤖';
-        body.add(tag(name));
+        const bt = tag(name);
+        body.add(bt);
+        body.userData.tag = bt;
         this.group.add(body);
         const bot = new Bot(track, slot, botPerf(gen, targetPI, rand), name, body);
         bot.skill = [0.70, 0.82, 0.92, 0.99][cfg.diff ?? 0] * (0.96 + rand() * 0.05);
@@ -356,7 +371,7 @@ export class Race {
 
   abort(msg) {
     if (msg && this.active) this.toast(msg);
-    if (this.active && this.finishT == null) this.online.raceLeave();
+    if (this.active && this.finishT == null && this.mp) this.online.raceLeave();
     for (const b of this.bots) { this.group.remove(b.body); b.body.traverse((o) => { if (o.isSprite) { o.material.map.dispose(); o.material.dispose(); } }); }
     this.bots = [];
     for (const g of this.gates) this.group.remove(g);
@@ -364,6 +379,7 @@ export class Race {
     this.state = 'idle';
     this.driver.frozen = false;
     this.el.hud.hidden = true; this.el.count.hidden = true; this.el.res.hidden = true;
+    this.showMsg('');
     document.body.classList.remove('racing');
     if (this.hooks && this.cfg) this.hooks.setTraffic(null);
     this.cfg = null;
@@ -437,7 +453,9 @@ export class Race {
     for (const b of this.bots) {
       b.step(dt, this.bots, me);
       const u = b.body.userData;
-      if (u.real) { const near = (b.x - carPos.x) ** 2 + (b.z - carPos.z) ** 2 < 75 * 75; u.real.visible = near; u.simple.visible = !near; }
+      const d2 = (b.x - carPos.x) ** 2 + (b.z - carPos.z) ** 2;
+      if (u.real) { const near = d2 < 75 * 75; u.real.visible = near; u.simple.visible = !near; }
+      if (u.tag) u.tag.visible = d2 < 95 * 95;
       const lapLen = this.track.pts.len;
       if (b.finished === null && b.raced >= this.laps * lapLen && b.started) b.finished = T;
     }
@@ -518,15 +536,22 @@ export class Race {
     const rows = this.standings(T);
     const pos = rows.findIndex((r) => r.me) + 1;
     this.toast(`🏁 เข้าเส้นชัยอันดับ ${pos} · ${fmt(T)}`);
-    this.online.raceProgress({ d: this.laps * this.track.pts.len, f: T }, true);
-    this.results(rows, false);
-    // reward is decided by the server (validated time + progress); place vs bots is ours
-    this.online.raceFinish({ t: T, place: pos }).then((res) => {
-      this.prize = res;
-      if (res.ok) this.hooks.reward?.(res);
-      else this.toast('⚠️ ' + (res.err || 'ส่งผลการแข่งไม่สำเร็จ'));
-      if (this.state === 'finished') this.results(this.standings(T), !!this.el.res.dataset.final);
-    });
+    if (this.mp && this.online.inRoom) {
+      this.online.raceProgress({ d: this.laps * this.track.pts.len, f: T }, true);
+      this.results(rows, false);
+      // reward is decided by the server (validated time + progress); place vs bots is ours
+      this.online.raceFinish({ t: T, place: pos }).then((res) => {
+        this.prize = res;
+        if (res.ok) this.hooks.reward?.(res);
+        else this.toast('⚠️ ' + (res.err || 'ส่งผลการแข่งไม่สำเร็จ'));
+        if (this.state === 'finished') this.results(this.standings(T), !!this.el.res.dataset.final);
+      });
+    } else {
+      const res = this.hooks.offlineFinish?.({ track: this.track.id, laps: this.laps, bots: this.bots.length, pos: pos - 1, t: T });
+      this.prize = res || { ok: true, prize: 0, rep: 0 };
+      if (res?.ok) this.hooks.reward?.(res);
+      this.results(rows, true);
+    }
   }
   results(rows, final) {
     const r = this.el.res;

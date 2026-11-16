@@ -9,16 +9,16 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const baht = (n) => '฿' + Math.round(n || 0).toLocaleString();
 const TRACK_NAMES = { touge: '⛰️ เขาใหญ่ Touge', city: '🏙️ ถนนพระราม 9 · อโศก', ring: '🛣️ ทางด่วนศรีรัช · มอเตอร์เวย์' };
 
-function labelSprite(text, color = '#fff', bg = 'rgba(8,10,14,0.75)', scale = 0.05) {
+function labelSprite(text, color = '#fff', bg = 'rgba(8,10,14,0.72)') {
   const c = document.createElement('canvas'); c.width = 512; c.height = 96;
   const g = c.getContext('2d');
-  g.font = '700 44px Kanit, sans-serif';
-  const w = Math.min(500, g.measureText(text).width + 48);
+  g.font = '700 42px Kanit, sans-serif';
+  const w = Math.min(496, g.measureText(text).width + 48);
   g.fillStyle = bg; g.beginPath(); g.roundRect((512 - w) / 2, 10, w, 76, 20); g.fill();
-  g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 50, 470);
+  g.fillStyle = color; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, 256, 50, 464);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, sizeAttenuation: false }));
-  s.scale.set(scale * 5.3, scale, 1); s.renderOrder = 12;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: true, depthWrite: false, transparent: true, sizeAttenuation: true }));
+  s.scale.set(4.6, 0.86, 1); s.renderOrder = 6;
   return s;
 }
 
@@ -52,6 +52,7 @@ export class GameWorld {
     this.cash = new Map(); // id → { c, mesh }
     this.markers = []; // { kind:'garage'|'race', id, x,y,z, mesh, label, r }
     this.pending = new Set();
+    this.dismissedLobbies = new Set();
     this.prompt = null; this.lobbyMine = null;
     this.$ = (id) => document.getElementById(id);
     this.ui();
@@ -105,7 +106,7 @@ export class GameWorld {
     const w = this.$('wallet');
     w.hidden = false;
     const money = m ? m.money : (this.hooks.localMoney?.() ?? 999999999);
-    const rep = m ? m.rep : 0;
+    const rep = m ? m.rep : (this.hooks.localRep?.() ?? 0);
     w.querySelector('.money').textContent = baht(money);
     w.querySelector('.rep').textContent = `${rep.toLocaleString()} REP`;
     if (delta) { w.classList.remove('gain'); void w.offsetWidth; w.classList.add('gain'); }
@@ -116,8 +117,8 @@ export class GameWorld {
     const el = document.createElement('div');
     el.className = 'fd ' + cls; el.innerHTML = html;
     f.prepend(el);
-    while (f.children.length > 5) f.lastChild.remove();
-    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 500); }, 5200);
+    while (f.children.length > 3) f.lastChild.remove();
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 400); }, 3400);
   }
   popGain(text, big) {
     const el = document.createElement('div');
@@ -210,10 +211,10 @@ export class GameWorld {
     const beam = new THREE.Mesh(beamGeo, m.kind === 'race' ? MAT.race : m.hidden ? MAT.garageHidden : MAT.garage);
     beam.material = beam.material.clone(); beam.material.opacity = 0.12; beam.scale.set(m.r * 0.9, 6, m.r * 0.9);
     const label = labelSprite(m.kind === 'race' ? `🏁 ${m.name}` : `🔧 ${m.name}`, m.kind === 'race' ? '#ffd0d8' : m.hidden ? '#ecd2ff' : '#d6f1ff');
-    label.position.y = 4.2;
+    label.position.y = 3.6;
     g.add(ring, ring2, beam, label);
     g.position.set(m.x, m.y, m.z);
-    m.mesh = g; m.ring2 = ring2;
+    m.mesh = g; m.ring2 = ring2; m.label = label;
     this.group.add(g);
     this.markers.push(m);
   }
@@ -245,11 +246,12 @@ export class GameWorld {
       mesh.userData.coin.position.y = 1.3 + Math.sin(t * 2 + c.z) * 0.15;
       if (d2 < 3.6 * 3.6 && Math.abs(dy) < 3 && !this.pending.has(id)) this.collect(id, c);
     }
-    // markers: pulse, show hidden garages only when close
+    // markers: pulse, show hidden garages only when close, cull labels beyond 95m
     let near = null;
     for (const m of this.markers) {
       const d = Math.hypot(m.x - pos.x, m.z - pos.z);
       m.mesh.visible = m.kind === 'race' ? !this.race.active : (m.found || d < 70);
+      if (m.label) m.label.visible = m.mesh.visible && d < 95;
       m.ring2.scale.setScalar(m.r * (0.55 + ((t * 0.6) % 1) * 0.45));
       if (m.mesh.visible && d < m.r && Math.abs(m.y - pos.y) < 4 && !near) near = m;
     }
@@ -322,16 +324,19 @@ export class GameWorld {
     const box = this.$('lobbies');
     const list = this.online.lobbies || [];
     const myId = this.online.myId;
+    for (const id of [...this.dismissedLobbies]) if (!list.some((l) => l.id === id)) this.dismissedLobbies.delete(id);
     this.lobbyMine = list.find((l) => l.ids.includes(myId)) || null;
     this.lobbyT0 = performance.now();
-    box.innerHTML = list.map((l) => {
+    const visible = list.filter((l) => l.ids.includes(myId) || !this.dismissedLobbies.has(l.id));
+    box.innerHTML = visible.map((l) => {
       const mine = l.ids.includes(myId);
-      return `<div class="lb ${mine ? 'mine' : ''}" data-id="${l.id}"><b>${TRACK_NAMES[l.track] || l.track}</b> · ${l.laps} รอบ<small>${esc(l.host)} · ${l.members.length} คน · <span class="lt" data-ms="${l.startsIn}">${Math.ceil(l.startsIn / 1000)}</span> วิ</small>
+      return `<div class="lb ${mine ? 'mine' : ''}" data-id="${l.id}"><b>${TRACK_NAMES[l.track] || l.track}</b> · ${l.laps} รอบ${mine ? '' : '<button type="button" class="lb-x" data-a="dismiss" aria-label="ซ่อน">✕</button>'}<small>${esc(l.host)} · ${l.members.length} คน · <span class="lt" data-ms="${l.startsIn}">${Math.ceil(l.startsIn / 1000)}</span> วิ</small>
         ${mine ? `${l.hostId === myId ? '<button data-a="go" class="on">เริ่มเลย</button>' : ''}<button data-a="leave">ออก</button>` : '<button data-a="join" class="on">เข้าร่วม (J)</button>'}</div>`;
     }).join('');
     box.querySelectorAll('.lb button').forEach((b) => {
       const id = b.closest('.lb').dataset.id;
       b.onclick = async () => {
+        if (b.dataset.a === 'dismiss') { this.dismissedLobbies.add(id); this.renderLobbies(); return; }
         if (b.dataset.a === 'join') { const r = await this.online.raceJoin(id); if (!r.ok) this.toast(r.err); else this.toast('เข้าร่วมแล้ว — รอเริ่มแข่ง'); }
         if (b.dataset.a === 'leave') this.online.raceLeave();
         if (b.dataset.a === 'go') this.online.raceGo();
@@ -414,20 +419,83 @@ export class GameWorld {
     this.$('wmInfo').innerHTML = `คลิกไอคอนบนแผนที่หรือปุ่มด้านบนเพื่อวาร์ปทันที · 🟣 อู่ลับที่เจอแล้ว ${found}/${hid} · 🟠 ผู้เล่นอื่น`;
   }
   async openProfile() {
-    const el = this.$('profile'), m = this.online.me;
-    if (!m) return;
+    const el = this.$('profile');
+    const local = this.hooks.localProfile?.() || {};
+    const m = this.online.me || {
+      name: this.online.name || 'นักซิ่ง',
+      username: null,
+      crew: null,
+      likes: 0,
+      discovered: [],
+      bounty: 0,
+      escapes: 0,
+      busted: 0,
+      ...local,
+      money: local.money ?? (this.hooks.localMoney?.() ?? 999999999),
+    };
+    const isOffline = !this.online.me;
     el.hidden = false;
     const body = el.querySelector('.pf-body');
     const rate = m.races ? Math.round((m.wins / m.races) * 100) : 0;
-    const cars = m.owned.filter((k) => k.startsWith('car:')).length + 1;
-    body.innerHTML = `<div class="pf-head"><div class="pf-av">${esc((m.name || '?').slice(0, 1))}</div><div><b>${esc(m.name)}</b><small>${m.rep.toLocaleString()} REP · ${cars} คันในโรงรถ</small></div><div class="pf-money">${baht(m.money)}</div></div>
-      <div class="pf-stats"><div><b>${m.races}</b><small>แข่ง</small></div><div><b>${m.wins}</b><small>ชนะ</small></div><div><b>${rate}%</b><small>อัตราชนะ</small></div><div><b>${(m.discovered || []).length}</b><small>อู่ลับที่เจอ</small></div>
-        <div><b>${baht(m.bounty)}</b><small>ค่าหัวสะสม</small></div><div><b>${m.escapes || 0}</b><small>หนีตำรวจได้</small></div><div><b>${m.busted || 0}</b><small>โดนจับ</small></div><div><b>${m.rep.toLocaleString()}</b><small>REP</small></div></div>
-      <h4>สถิติเวลา</h4><div class="pf-best">${Object.entries(TRACK_NAMES).map(([id, n]) => `<div>${n}<b>${fmtTime(m.best?.[id])}</b></div>`).join('')}</div>
-      <h4>🏆 อันดับนักซิ่ง (REP)</h4><ol class="pf-lb rep"><li>กำลังโหลด…</li></ol>
-      <h4>🚨 MOST WANTED (ค่าหัว)</h4><ol class="pf-lb wanted"><li>กำลังโหลด…</li></ol>`;
-    const lb = await this.online.leader() || {};
-    body.querySelector('.pf-lb.rep').innerHTML = (lb.rep || []).map((r, i) => `<li class="${r.name === m.name ? 'me' : ''}"><span>${i + 1}. ${esc(r.name)}</span><b>${r.rep.toLocaleString()}</b><small>${r.wins}/${r.races} ชนะ</small></li>`).join('') || '<li>ยังไม่มีข้อมูล — ไปแข่งเลย!</li>';
-    body.querySelector('.pf-lb.wanted').innerHTML = (lb.wanted || []).map((r, i) => `<li class="${r.name === m.name ? 'me' : ''}"><span>${i + 1}. ${esc(r.name)}</span><b>${baht(r.bounty)}</b><small>หนีได้ ${r.escapes} · โดนจับ ${r.busted}</small></li>`).join('') || '<li>ยังไม่มีใครถูกตั้งค่าหัว — ขับเร็วผ่านหน้าตำรวจดูสิ</li>';
+    const cars = (m.owned || []).filter((k) => k.startsWith('car:')).length + 1;
+    const crewTag = m.crew ? `<span class="crew-tag">[${esc(m.crew)}]</span> ` : '';
+    const bestOf = (id) => m.best?.[id] ?? this.race?.bestOf(id) ?? null;
+    const d100 = m.best?.drag100 ?? local.best?.drag100;
+    const d402 = m.best?.drag402 ?? local.best?.drag402;
+    body.innerHTML = `<div class="pf-head"><div class="pf-av">${esc((m.name || '?').slice(0, 1))}</div><div><b>${crewTag}${esc(m.name)}</b><small>${m.username ? '@' + esc(m.username) : isOffline ? 'โหมดออฟไลน์' : 'ผู้เล่นออนไลน์'} · ${(m.rep || 0).toLocaleString()} REP · ${cars} คัน</small></div><div class="pf-money">${baht(m.money)}</div></div>
+      <div class="pf-stats">
+        <div><b>${m.races || 0}</b><small>แข่ง</small></div>
+        <div><b>${m.wins || 0} (${rate}%)</b><small>ชนะ</small></div>
+        <div><b>${(m.stuntBest || 0).toLocaleString()}</b><small>สตั๊นท์ดีสุด</small></div>
+        <div><b>${(m.stuntTotal || 0).toLocaleString()}</b><small>สตั๊นท์รวม</small></div>
+        <div><b>👍 ${m.likes || 0}</b><small>ถูกใจรถ</small></div>
+        <div><b>${(m.discovered || []).length}</b><small>อู่ลับที่เจอ</small></div>
+        <div><b>${baht(m.bounty || 0)}</b><small>ค่าหัวสะสม</small></div>
+        <div><b>${(m.rep || 0).toLocaleString()}</b><small>คะแนน REP</small></div>
+      </div>
+      <h4>⏱️ สถิติเวลา &amp; เทสสนาม</h4>
+      <div class="pf-best">
+        ${Object.entries(TRACK_NAMES).map(([id, n]) => `<div>${n}<b>${fmtTime(bestOf(id))}</b></div>`).join('')}
+        <div>⚡ 0–100 กม./ชม.<b>${d100 != null ? Number(d100).toFixed(2) + 's' : '--'}</b></div>
+        <div>🏁 ควอเตอร์ไมล์ 402 ม.<b>${d402 != null ? Number(d402).toFixed(2) + 's' : '--'}</b></div>
+      </div>
+      <h4>🏅 กระดานอันดับโลก</h4>
+      <div class="seg small pf-tabs">
+        <button data-lbt="rep" class="on">🏆 REP</button>
+        <button data-lbt="stunt">🔥 สตั๊นท์</button>
+        <button data-lbt="likes">👑 Car Meet</button>
+        <button data-lbt="wanted">🚨 Wanted</button>
+      </div>
+      <ol class="pf-lb"><li>${isOffline ? 'เชื่อมต่อออนไลน์เพื่อดูอันดับโลก (สถิติออฟไลน์ของคุณถูกบันทึกไว้แล้ว)' : 'กำลังโหลด…'}</li></ol>`;
+    let activeTab = 'rep';
+    let lbData = null;
+    const isMeRow = (r) => r.name === m.name && (!r.username || !m.username || r.username === m.username);
+    const renderTab = (tab) => {
+      activeTab = tab;
+      body.querySelectorAll('.pf-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.lbt === tab));
+      const ol = body.querySelector('.pf-lb');
+      if (!ol) return;
+      if (isOffline) {
+        ol.innerHTML = '<li>🌐 ออฟไลน์อยู่ — กดปุ่มผู้เล่นมุมบนเพื่อเชื่อมต่อออนไลน์และดูอันดับผู้เล่นทั้งหมด</li>';
+        return;
+      }
+      if (!lbData) return;
+      const rows = lbData[tab] || [];
+      const rowName = (r) => `${r.crew ? `<span class="crew-tag">[${esc(r.crew)}]</span> ` : ''}${esc(r.name)}`;
+      if (tab === 'rep') {
+        ol.innerHTML = rows.map((r, i) => `<li class="${isMeRow(r) ? 'me' : ''}"><span>${i + 1}. ${rowName(r)}</span><b>${(r.rep || 0).toLocaleString()} REP</b><small>${r.wins}/${r.races} ชนะ · สตั๊นท์ดีสุด ${(r.stuntBest || 0).toLocaleString()}</small></li>`).join('') || '<li>ยังไม่มีข้อมูล — ไปแข่งหรือทำสตั๊นท์เลย!</li>';
+      } else if (tab === 'stunt') {
+        ol.innerHTML = rows.map((r, i) => `<li class="${isMeRow(r) ? 'me' : ''}"><span>${i + 1}. ${rowName(r)}</span><b>${(r.stuntBest || 0).toLocaleString()} PTS</b><small>สะสม ${(r.stuntTotal || 0).toLocaleString()} PTS · ${(r.rep || 0).toLocaleString()} REP</small></li>`).join('') || '<li>ยังไม่มีสถิติสตั๊นท์ — ดริฟต์หรือเหยียบ 155+ กม./ชม. ในเมือง!</li>';
+      } else if (tab === 'likes') {
+        ol.innerHTML = rows.map((r, i) => `<li class="${isMeRow(r) ? 'me' : ''}"><span>${i + 1}. ${rowName(r)}</span><b>👍 ${r.likes || 0}</b><small>${(r.rep || 0).toLocaleString()} REP</small></li>`).join('') || '<li>ยังไม่มีคะแนนโหวต Car Meet — แต่งรถให้เท่แล้วให้เพื่อนกด 👍</li>';
+      } else {
+        ol.innerHTML = rows.map((r, i) => `<li class="${isMeRow(r) ? 'me' : ''}"><span>${i + 1}. ${rowName(r)}</span><b>${baht(r.bounty)}</b><small>หนีได้ ${r.escapes} · โดนจับ ${r.busted}</small></li>`).join('') || '<li>ยังไม่มีใครถูกตั้งค่าหัว</li>';
+      }
+    };
+    body.querySelectorAll('.pf-tabs button').forEach((b) => { b.onclick = () => renderTab(b.dataset.lbt); });
+    if (!isOffline) {
+      lbData = await this.online.leader() || {};
+      if (!el.hidden) renderTab(activeTab);
+    }
   }
 }

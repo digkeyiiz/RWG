@@ -2,7 +2,7 @@
 // the server puts everyone into a shared world automatically.
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
+export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warpTo }) {
   const btn = document.getElementById('btnOnline');
   const box = document.getElementById('onlineBox');
   const body = box.querySelector('.ob-body');
@@ -10,8 +10,19 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
   const chatForm = document.getElementById('chatForm');
   const chatIn = document.getElementById('chatIn');
 
-  const open = (v = true) => { box.hidden = !v; if (v) render(); };
-  btn.onclick = () => open(box.hidden);
+  const open = (v = true) => {
+    box.hidden = !v;
+    if (v) {
+      const so = document.getElementById('social');
+      if (so) so.hidden = true;
+      render();
+    }
+  };
+  btn.onclick = () => {
+    const show = box.hidden;
+    open(show);
+    if (show && !online.inRoom) online.start();
+  };
   box.querySelector('.ob-close').onclick = () => open(false);
   document.getElementById('btnChat').onclick = () => { chatForm.hidden = !chatForm.hidden; if (!chatForm.hidden) chatIn.focus(); };
   addEventListener('keydown', (e) => {
@@ -21,13 +32,24 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
   function render() {
     btn.classList.toggle('off', !online.inRoom);
     if (box.hidden) return;
-    if (!online.inRoom) { body.innerHTML = '<p class="ob-note">กำลังเชื่อมต่อ…</p>'; return; }
+    if (!online.inRoom) {
+      body.innerHTML = `<p class="ob-note">ยังไม่ได้เชื่อมต่อเซิร์ฟเวอร์ออนไลน์</p><button id="obReconn" class="on wide">🔄 เชื่อมต่อเข้าเมืองออนไลน์</button>`;
+      body.querySelector('#obReconn').onclick = async () => {
+        const b = body.querySelector('#obReconn');
+        if (b) { b.disabled = true; b.textContent = 'กำลังเชื่อมต่อ…'; }
+        const r = await online.start();
+        if (!r?.ok) toast('⚠️ ' + (r?.err || 'เชื่อมต่อไม่สำเร็จ'));
+        render();
+      };
+      return;
+    }
     const list = [...online.peers.values()].sort((a, b) => (b.likes || 0) - (a.likes || 0));
     const myCrew = online.me?.crew ? `<span class="crew-tag">[${esc(online.me.crew)}]</span> ` : '';
     const maxLikes = Math.max(online.me?.likes || 0, ...list.map((p) => p.likes || 0));
     const myKing = maxLikes > 0 && (online.me?.likes || 0) === maxLikes ? '<span class="king-badge">👑 King</span>' : '';
+    const mePos = online.driver?.pos;
     body.innerHTML = `
-      <div class="ob-l">เมือง ${esc(online.code)} · ${list.length + 1} คน · ทั้งเซิร์ฟเวอร์ ${online.online ?? '-'} คน</div>
+      <div class="ob-l">เมือง ${esc(online.code)} · ${list.length + 1} คนในห้อง · ออนไลน์รวม ${online.online ?? (list.length + 1)} คน</div>
       <div class="ob-meet-bar">
         <button id="obMeetBtn" class="on">🚗 วาร์ปไป Car Meet</button>
         <div class="ob-crew-in"><input id="obCrewIn" maxlength="6" placeholder="แท็กคลับ (เช่น BKK)" value="${esc(online.me?.crew || '')}"><button id="obCrewBtn">ตั้ง</button></div>
@@ -39,12 +61,15 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
         <button data-emote="❤️ ถูกใจคันนี้">❤️</button>
         <button data-emote="⚡ รวมตัว Car Meet!">⚡</button>
       </div>
-      <ul class="ob-list"><li class="me">🚗 ${myCrew}${esc(online.name)} (คุณ)${myKing} <small>👍 ${online.me?.likes || 0}</small></li>${list.map((p) => {
+      <ul class="ob-list"><li class="me"><span>🚗 ${myCrew}${esc(online.name)} (คุณ)${myKing}</span> <small>👍 ${online.me?.likes || 0}</small></li>${list.map((p) => {
         const king = maxLikes > 0 && (p.likes || 0) === maxLikes ? '<span class="king-badge">👑 King</span>' : '';
-        return `<li>🚗 ${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}${p.username ? ` <small>@${esc(p.username)}</small>` : ''} <span><button data-look="${p.id}" title="ส่องรถ 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
+        const distTxt = p.pose && mePos
+          ? ` · ${Math.round(Math.hypot(p.pose.x - mePos.x, p.pose.z - mePos.z))}ม.`
+          : p.inGarage ? ' · ในอู่' : '';
+        return `<li><div class="ob-pname">${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}<small>${p.username ? `@${esc(p.username)}` : ''}${distTxt}</small></div> <span class="ob-acts"><button data-warp="${p.id}" title="วาร์ปไปหาเพื่อนคนนี้">🚀</button><button data-look="${p.id}" title="ส่องรถ 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
       }).join('')}</ul>
-      ${list.length ? '' : '<p class="ob-note">ยังไม่มีใครอื่นในเมืองตอนนี้ — ชวนเพื่อนมาจอดโชว์รถที่ Car Meet หรือขับเล่นรอได้เลย</p>'}
-      <p class="ob-note">คีย์ลัดออนไลน์: <kbd>H</kbd> บีบแตร · <kbd>L</kbd> กะพริบไฟ · <kbd>C</kbd> ท้าแข่งคนใกล้ตัว</p>`;
+      ${list.length ? '' : '<p class="ob-note">ยังไม่มีใครอื่นในเมืองตอนนี้ — ชวนเพื่อนเปิดเว็บเดียวกันก็จะเจอกันในเมืองเดียวทันที</p>'}
+      <p class="ob-note">กด 🚀 วาร์ปไปหาใครก็ได้ในเมือง · <kbd>H</kbd> แตร · <kbd>L</kbd> กะพริบไฟ · <kbd>C</kbd> ท้าแข่ง</p>`;
     body.querySelector('#obMeetBtn').onclick = () => { open(false); carMeet?.(); };
     body.querySelectorAll('.ob-emotes button').forEach((b) => {
       b.onclick = () => { online.chat(b.dataset.emote); toast('💬 ส่งทักทายแล้ว'); };
@@ -57,6 +82,17 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
     };
     body.querySelector('#obCrewBtn').onclick = saveCrew;
     body.querySelector('#obCrewIn').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveCrew(); };
+    body.querySelectorAll('button[data-warp]').forEach((b) => {
+      b.onclick = async () => {
+        const peer = online.peers.get(b.dataset.warp);
+        const r = await online.warpPeer(b.dataset.warp);
+        if (!r?.ok) return toast(r?.err || 'วาร์ปไม่ได้');
+        open(false);
+        const livePose = online.peers.get(r.id)?.pose || peer?.pose || r.pose;
+        if (!livePose && r.inGarage) { toast(`🔧 ${r.name} กำลังแต่งรถอยู่ในอู่`); return; }
+        warpTo?.(livePose, r.id);
+      };
+    });
     body.querySelectorAll('button[data-look]').forEach((b) => {
       b.onclick = () => { const p = online.peers.get(b.dataset.look); if (p) { open(false); inspect(p); } };
     });
@@ -79,8 +115,8 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
     el.className = 'chat-line';
     el.innerHTML = `<b>${esc(m.name)}</b> ${esc(m.text)}`;
     chatLog.append(el);
-    while (chatLog.children.length > 6) chatLog.firstChild.remove();
-    setTimeout(() => el.classList.add('fade'), 9000);
+    while (chatLog.children.length > 4) chatLog.firstChild.remove();
+    setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 900); }, 6500);
   }
   chatForm.onsubmit = (e) => { e.preventDefault(); online.chat(chatIn.value); chatIn.value = ''; chatIn.blur(); chatForm.hidden = true; };
   chatIn.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.code === 'Escape') { chatIn.blur(); chatForm.hidden = true; } });

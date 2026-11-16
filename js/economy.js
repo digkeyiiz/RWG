@@ -61,5 +61,13 @@ export function racePrize(track, laps, pos, racers, bots) {
 export const repFor = (pos, racers) => (racers >= 2 ? [120, 60, 30][pos] ?? 15 : [40, 15, 5][pos] ?? 0);
 export const PICKUP = { small: [300, 900], big: [4000, 7000] };
 export const GARAGE_DISCOVERY = 3000;
+export function stuntReward(pts) {
+  const n = Math.min(25000, Math.max(0, Math.round(Number(pts) || 0)));
+  if (n < 150) return { cash: 0, rep: 0 };
+  return {
+    cash: Math.min(12000, Math.max(100, Math.round((n * 0.65) / 10) * 10)),
+    rep: Math.min(80, Math.max(2, Math.round(n / 120))),
+  };
+}
 // fastest plausible average speed (m/s) — anything faster is rejected as a cheat
-export const MAX_AVG_SPEED = 75;
+export const MAX_AVG_SPEED = 95;

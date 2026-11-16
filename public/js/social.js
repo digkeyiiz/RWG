@@ -19,7 +19,14 @@ export class Social {
     online.on((ev) => this.onNet(ev));
   }
 
-  open(v = true) { this.el.hidden = !v; if (v) this.refresh(); }
+  open(v = true) {
+    this.el.hidden = !v;
+    if (v) {
+      const ob = document.getElementById('onlineBox');
+      if (ob) ob.hidden = true;
+      this.refresh();
+    }
+  }
   async refresh() {
     if (!this.online.inRoom) { this.render(); return; }
     const r = await this.online.friends();
@@ -52,7 +59,8 @@ export class Social {
   card(html, actions) {
     const c = document.createElement('div');
     c.className = 'lb soc';
-    c.innerHTML = `<b>${html}</b>`;
+    c.innerHTML = `<b>${html}</b><button type="button" class="lb-x" aria-label="ปิด">✕</button>`;
+    c.querySelector('.lb-x').onclick = () => c.remove();
     for (const [label, fn] of actions) {
       const b = document.createElement('button');
       b.textContent = label; if (fn) b.className = 'on';
@@ -60,7 +68,8 @@ export class Social {
       c.append(b);
     }
     this.cards.append(c);
-    setTimeout(() => c.remove(), 45000);
+    while (this.cards.children.length > 2) this.cards.firstChild.remove();
+    setTimeout(() => c.remove(), 30000);
   }
 
   render() {

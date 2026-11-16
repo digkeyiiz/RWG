@@ -174,11 +174,24 @@ const race = new Race({
     spawn: (sp) => spawnRaw(sp),
     setTraffic: (v) => { raceTraffic = v; syncTraffic(); },
     reward: (res) => { game.updateWallet(res.prize); if (res.prize) { game.popGain('+฿' + res.prize.toLocaleString(), true); game.sound('big'); } game.feed(`🏆 ได้รางวัล <b>฿${res.prize.toLocaleString()}</b> · +${res.rep} REP`, 'gold'); },
+    offlineFinish: ({ track, laps, bots, pos, t }) => {
+      const prize = ECON.racePrize(track, laps, pos, 1, bots);
+      const rep = ECON.repFor(pos, 1);
+      localMoney += prize;
+      localStats.rep += rep;
+      localStats.races += 1;
+      if (pos === 0 && bots > 0) localStats.wins += 1;
+      const roundT = Math.round(t * 100) / 100;
+      if (!(localStats.best[track] <= roundT)) localStats.best[track] = roundT;
+      saveLocalShop(); saveLocalStats();
+      return { ok: true, prize, rep, pos };
+    },
   },
 });
 race.econ = ECON;
 const LOCAL_MONEY_KEY = 'viosGarage.localMoney.v1';
 const LOCAL_OWNED_KEY = 'viosGarage.localOwned.v1';
+const LOCAL_STATS_KEY = 'viosGarage.localStats.v1';
 let localMoney = (() => {
   try {
     const v = Number(localStorage.getItem(LOCAL_MONEY_KEY));
@@ -189,11 +202,21 @@ const localOwned = (() => {
   try { return new Set(JSON.parse(localStorage.getItem(LOCAL_OWNED_KEY) || '[]')); }
   catch { return new Set(); }
 })();
+const localStats = (() => {
+  const def = { rep: 0, races: 0, wins: 0, stuntBest: 0, stuntTotal: 0, best: {}, drag100: null, drag402: null };
+  try {
+    const raw = JSON.parse(localStorage.getItem(LOCAL_STATS_KEY) || '{}');
+    return { ...def, ...raw, best: { ...(raw.best || {}) } };
+  } catch { return def; }
+})();
 const saveLocalShop = () => {
   try {
     localStorage.setItem(LOCAL_MONEY_KEY, String(localMoney));
     localStorage.setItem(LOCAL_OWNED_KEY, JSON.stringify([...localOwned]));
   } catch {}
+};
+const saveLocalStats = () => {
+  try { localStorage.setItem(LOCAL_STATS_KEY, JSON.stringify(localStats)); } catch {}
 };
 
 online.claim = () => [...new Set([...localOwned, ...garage.list().flatMap((b) => ECON.buildKeys(b))])].filter((k) => ECON.priceOf(k));
@@ -207,6 +230,17 @@ const game = new GameWorld({
     chased: () => false,
     hide: () => true,
     localMoney: () => localMoney,
+    localRep: () => localStats.rep,
+    localProfile: () => ({
+      money: localMoney,
+      owned: [...localOwned],
+      rep: localStats.rep,
+      races: localStats.races,
+      wins: localStats.wins,
+      stuntBest: localStats.stuntBest,
+      stuntTotal: localStats.stuntTotal,
+      best: { ...localStats.best, drag100: localStats.drag100, drag402: localStats.drag402 },
+    }),
     warpMarker: async (m) => {
       if (cityMap !== 'bkk') await switchCityMap('bkk');
       if (mode !== 'city') await setMode('city');
@@ -452,10 +486,33 @@ function garageSpawn(g) {
   else if (g.id === 'station' || g.id === 'underpass') heading = Math.PI / 2;
   return { x: m.x, y: m.y, z: m.z, heading };
 }
+const peerHash = (id) => {
+  let h = 0;
+  const s = String(id || 'me');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+};
+function slotNearClear(x, z) {
+  if (!online?.peers?.size) return true;
+  for (const p of online.peers.values()) {
+    const q = p.pose || (p.snaps?.length ? { x: p.snaps[p.snaps.length - 1].s[0], z: p.snaps[p.snaps.length - 1].s[2] } : null);
+    if (q && Math.hypot(q.x - x, q.z - z) < 4.5) return false;
+  }
+  return true;
+}
 function spawnAt(sp) {
-  // online: line players up behind each other so friends don't spawn inside one another
-  const k = online?.inRoom ? online.peers.size % 6 : 0;
-  if (k) sp = { ...sp, x: sp.x - Math.cos(sp.heading || 0) * 7 * k, z: sp.z + Math.sin(sp.heading || 0) * 7 * k };
+  const base = { ...sp }, h = base.heading || 0;
+  if (online?.inRoom) {
+    const startK = peerHash(online.myId) % 8;
+    for (let step = 0; step < 12; step++) {
+      const k = step === 0 ? startK : step - 1;
+      const lane = (k % 2 ? 1 : -1) * (k === 0 ? 0 : 2.1);
+      const back = Math.floor(k / 2) * 6.5;
+      const x = base.x - Math.cos(h) * back + Math.sin(h) * lane;
+      const z = base.z + Math.sin(h) * back + Math.cos(h) * lane;
+      if (slotNearClear(x, z)) { sp = { ...base, x, z }; break; }
+    }
+  }
   driver.reset(sp);
   driver.step(0.001);
   const back = new THREE.Vector3(-7, 2.6, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), driver.heading).add(car.root.position);
@@ -612,10 +669,17 @@ const goCarMeet = async () => {
   await ensureCity();
   if (cityMap !== 'bkk') await switchCityMap('bkk');
   if (mode !== 'city') await setMode('city');
-  const slot = online?.inRoom ? (online.peers.size % 8) : 0;
-  const ang = -Math.PI / 2 + (slot - 3.5) * 0.28;
-  const r = 14;
-  spawnRaw({ x: 352 + Math.cos(ang) * r, y: 0, z: -150 + Math.sin(ang) * r, heading: -ang + Math.PI });
+  const baseSlot = online?.inRoom ? (peerHash(online.myId) % 16) : 0;
+  let pose = null;
+  for (let i = 0; i < 16; i++) {
+    const slot = (baseSlot + i) % 16;
+    const ang = -Math.PI / 2 + (slot - 7.5) * 0.32;
+    const r = slot >= 8 ? 19.5 : 13.5;
+    const x = 352 + Math.cos(ang) * r, z = -150 + Math.sin(ang) * r;
+    if (slotNearClear(x, z)) { pose = { x, y: 0, z, heading: -ang + Math.PI }; break; }
+  }
+  if (!pose) pose = { x: 352, y: 0, z: -164, heading: Math.PI / 2 };
+  spawnRaw(pose);
   car.setAutoLights(true);
   toast('✨ ยินดีต้อนรับสู่ Car Meet ใต้ทางด่วนดินแดง!');
 };
@@ -628,7 +692,10 @@ document.getElementById('btnBackGarage').onclick = () => {
   enterGarage(inGarage || { id: 'showroom', name: 'อู่กลาง & โชว์รูม' });
 };
 const dragHud = document.getElementById('dragHud');
-const dragState = { active: false, t0: 0, t100: null, t402: null, dist: 0, best100: null, best402: null };
+const dragState = {
+  active: false, t0: 0, t100: null, t402: null, dist: 0,
+  best100: localStats.drag100, best402: localStats.drag402,
+};
 function resetDragTest() {
   dragState.active = false; dragState.t0 = 0; dragState.t100 = null; dragState.t402 = null; dragState.dist = 0;
   if (dragHud) dragHud.innerHTML = `<span>0-100: <b>--</b></span><span>402m: <b>--</b></span>${dragState.best402 ? `<span>ดีสุด: <b>${dragState.best402.toFixed(2)}s</b></span>` : ''}`;
@@ -639,8 +706,28 @@ function updateDragTest(dt, kmh, spd) {
   if (spd < 0.3 && dragState.dist > 5) { resetDragTest(); return; }
   dragState.dist += spd * dt;
   const el = performance.now() / 1000 - dragState.t0;
-  if (dragState.t100 === null && kmh >= 100) { dragState.t100 = el; if (!dragState.best100 || el < dragState.best100) dragState.best100 = el; toast(`⚡ 0-100 กม./ชม.: ${el.toFixed(2)} วินาที!`); }
-  if (dragState.t402 === null && dragState.dist >= 402) { dragState.t402 = el; if (!dragState.best402 || el < dragState.best402) dragState.best402 = el; toast(`🏁 402 เมตร: ${el.toFixed(2)} วินาที!`); }
+  if (dragState.t100 === null && kmh >= 100) {
+    dragState.t100 = el;
+    const pr = !(dragState.best100 <= el);
+    if (pr) {
+      dragState.best100 = Math.round(el * 100) / 100;
+      localStats.drag100 = Math.min(localStats.drag100 ?? 999, dragState.best100);
+      saveLocalStats();
+      online?.saveDrag(dragState.best100, null).then((r) => { if (r?.updated) game.updateWallet(); });
+    }
+    toast(`⚡ 0-100 กม./ชม.: ${el.toFixed(2)} วินาที!${pr ? ' (สถิติใหม่!)' : ''}`);
+  }
+  if (dragState.t402 === null && dragState.dist >= 402) {
+    dragState.t402 = el;
+    const pr = !(dragState.best402 <= el);
+    if (pr) {
+      dragState.best402 = Math.round(el * 100) / 100;
+      localStats.drag402 = Math.min(localStats.drag402 ?? 999, dragState.best402);
+      saveLocalStats();
+      online?.saveDrag(null, dragState.best402).then((r) => { if (r?.updated) game.updateWallet(); });
+    }
+    toast(`🏁 402 เมตร: ${el.toFixed(2)} วินาที!${pr ? ' (สถิติใหม่!)' : ''}`);
+  }
   if (dragHud) dragHud.innerHTML = `<span>0-100: <b>${dragState.t100 != null ? dragState.t100.toFixed(2) + 's' : (kmh >= 1 ? el.toFixed(1) + 's' : '--')}</b></span><span>402m (${Math.min(402, Math.round(dragState.dist))}m): <b>${dragState.t402 != null ? dragState.t402.toFixed(2) + 's' : el.toFixed(1) + 's'}</b></span>`;
 }
 addEventListener('keydown', (e) => {
@@ -862,11 +949,35 @@ function updateSkillHud(dt, kmh, slide, impact, rm, cp) {
     skill.timer -= dt;
     if (skill.timer <= 0) {
       const banked = Math.round(skill.pts * skill.mult);
+      const lbl = skill.lbl || 'STUNT';
       skill.pts = 0; skill.mult = 1; skill.timer = 0; skillHudEl.hidden = true;
       if (banked >= 150) {
-        game.popGain(`+${banked.toLocaleString()} STUNT`, banked >= 1500);
-        game.sound(banked >= 1500 ? 'big' : 'cash');
-        if (banked >= 1200) game.feed(`🏆 คอมโบ <b>${skill.lbl || 'STUNT'}</b> +${banked.toLocaleString()} PTS`, 'gold');
+        const rw = ECON.stuntReward(banked);
+        localStats.stuntTotal += banked;
+        if (banked > localStats.stuntBest) localStats.stuntBest = banked;
+        saveLocalStats();
+        if (online.inRoom) {
+          online.bankStunt(banked, lbl).then((r) => {
+            if (r?.ok) {
+              game.updateWallet(r.cash);
+              game.popGain(`+${banked.toLocaleString()} STUNT · +฿${r.cash.toLocaleString()} · +${r.rep} REP`, banked >= 1500);
+              game.sound(banked >= 1500 ? 'big' : 'cash');
+              if (r.best || banked >= 1200) game.feed(`🏆 คอมโบ <b>${lbl}</b> ${banked.toLocaleString()} PTS (+฿${r.cash.toLocaleString()} · +${r.rep} REP)`, 'gold');
+            } else {
+              game.popGain(`+${banked.toLocaleString()} STUNT`, banked >= 1500);
+              game.sound(banked >= 1500 ? 'big' : 'cash');
+            }
+          });
+        } else {
+          localMoney += rw.cash;
+          localStats.rep += rw.rep;
+          saveLocalShop();
+          saveLocalStats();
+          game.updateWallet(rw.cash);
+          game.popGain(`+${banked.toLocaleString()} STUNT · +฿${rw.cash.toLocaleString()} · +${rw.rep} REP`, banked >= 1500);
+          game.sound(banked >= 1500 ? 'big' : 'cash');
+          if (banked >= 1200) game.feed(`🏆 คอมโบ <b>${lbl}</b> ${banked.toLocaleString()} PTS (+฿${rw.cash.toLocaleString()} · +${rw.rep} REP)`, 'gold');
+        }
       }
       return;
     }
@@ -1034,29 +1145,36 @@ function frame(now) {
   }
   // ---------- social: friends, party, warp, car showcase ----------
   let inspecting = null;
+  const warpToPose = async (pose, id) => {
+    if (race.active) race.abort();
+    if (inGarage) {
+      savedCityPose = null;
+      inGarage = null;
+      online.garage(null);
+      document.body.classList.remove('garage');
+    }
+    if (cityMap !== 'bkk') await switchCityMap('bkk');
+    if (mode !== 'city') await setMode('city');
+    if (!pose) { toast('วาร์ปแล้ว — เพื่อนยังไม่ได้ขับในเมือง'); return; }
+    // land a few metres beside the friend's car
+    setTimeout(() => {
+      const p = id && online.peers.get(id)?.pose;
+      const h = p ? p.h : (pose.h || 0), tgt = p || pose;
+      spawnRaw({ x: tgt.x - Math.cos(h) * 7 + Math.sin(h) * 3, y: tgt.y, z: tgt.z + Math.sin(h) * 7 + Math.cos(h) * 3, heading: h });
+      toast('🚀 วาร์ปถึงเพื่อนแล้ว');
+    }, 450);
+  };
   const social = new Social({
     online, toast, game,
     hooks: {
-      warpTo: async (pose, id) => {
-        if (race.active) race.abort();
-        if (inGarage) document.getElementById('btnExitGarage').click();
-        if (mode !== 'city') await setMode('city');
-        if (!pose) { toast('วาร์ปแล้ว — เพื่อนยังไม่ได้ขับในเมือง'); return; }
-        // land a few metres beside the friend's car
-        setTimeout(() => {
-          const p = id && online.peers.get(id)?.pose;
-          const h = p ? p.h : 0, tgt = p || pose;
-          spawnRaw({ x: tgt.x - Math.cos(h) * 7 + Math.sin(h) * 3, y: tgt.y, z: tgt.z + Math.sin(h) * 7 + Math.cos(h) * 3, heading: h });
-          toast('🚀 วาร์ปถึงเพื่อนแล้ว');
-        }, 600);
-      },
+      warpTo: warpToPose,
       partyRace: async () => { await ensureCity(); race.openSetup(null, null, true); },
       challenge: (t) => race.openSetup(null, t),
       startInspect: (peer) => { inspecting = peer; online.inspectingId = peer?.id || null; driver.frozen = true; document.body.classList.add('inspecting'); controls.autoRotate = true; controls.autoRotateSpeed = 1.2; },
       endInspect: () => { inspecting = null; online.inspectingId = null; driver.frozen = false; document.body.classList.remove('inspecting'); controls.autoRotate = false; },
     },
   });
-  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet });
+  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet, warpTo: warpToPose });
   online.on((ev) => {
     if (ev?.carAct?.kind === 'horn' && mode === 'city') {
       const p = online.peers.get(ev.carAct.id)?.pose;
@@ -1075,13 +1193,25 @@ function frame(now) {
     const r = await online.start();
     if (!r.ok) {
       game.updateWallet();
-      game.feed('🌐 เล่นแบบออฟไลน์ชั่วคราว — เชื่อมต่อบัญชีได้ภายหลังที่เมนู 👥');
+      game.feed('🌐 เล่นแบบออฟไลน์ชั่วคราว — กดปุ่มผู้เล่นมุมบนเพื่อต่อออนไลน์');
       return;
     }
     if (panel.missing(build).some((k) => k.startsWith('car:'))) { garage.put(build); build = garage.get('gen2'); }
     stripUnowned(build);
     car.setBuild(build); updateCredit(); persist(); online.sendBuild();
     lastGoodEngine = JSON.parse(JSON.stringify(build.engine || null));
+    if (online.me?.best?.drag100 != null) {
+      dragState.best100 = Math.min(dragState.best100 ?? 999, online.me.best.drag100);
+      localStats.drag100 = dragState.best100;
+    }
+    if (online.me?.best?.drag402 != null) {
+      dragState.best402 = Math.min(dragState.best402 ?? 999, online.me.best.drag402);
+      localStats.drag402 = dragState.best402;
+    }
+    saveLocalStats();
+    if (mode === 'city' && driver.vel.length() < 1 && !slotNearClear(driver.pos.x, driver.pos.z)) {
+      spawnAt({ x: driver.pos.x, y: driver.y || 0, z: driver.pos.z, heading: driver.heading });
+    }
     game.updateWallet();
     game.feed(`ยินดีต้อนรับ <b>${online.name}</b> · เงิน ฿${online.me.money.toLocaleString()} · ออนไลน์ ${r.online} คน`);
     if (r.me.races === 0) game.feed('💡 เก็บเหรียญ ฿ ตามถนน · วงฟ้า = อู่ (กด E) · วงม่วง = อู่ลับ · วงแดง = จุดแข่ง · M = แผนที่', 'tip');
