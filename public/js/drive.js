@@ -325,12 +325,14 @@ export class Driver {
   }
 
   cones(dt) {
-    const p = this.pos;
+    const px = this.pos.x, pz = this.pos.z;
+    const spd = this.vel.length();
     for (const c of this.world.cones) {
-      const d = c.position.clone().sub(p); d.y = 0;
-      const dist = d.length();
-      if (dist < 1.3 && this.vel.length() > 0.5) {
-        c.userData.vel.copy(this.vel).multiplyScalar(1.2).add(d.normalize().multiplyScalar(2));
+      const dx = c.position.x - px, dz = c.position.z - pz;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 1.3 && spd > 0.5) {
+        const inv = 1 / (dist || 1);
+        c.userData.vel.set(this.vel.x * 1.2 + dx * inv * 2, 0, this.vel.z * 1.2 + dz * inv * 2);
         c.userData.spin = 6;
       }
       if (c.userData.vel.lengthSq() > 0.001) {
@@ -356,24 +358,39 @@ export class Driver {
       const gain = ctx.createGain(); gain.gain.value = 0;
       osc1.connect(filter); osc2.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
       osc1.start(); osc2.start();
-      // tyre screech: looping noise through a band-pass, volume follows how much the car slides
+      // turbo spool whistle
+      const turboOsc = ctx.createOscillator(); turboOsc.type = 'sine'; turboOsc.frequency.value = 2200;
+      const turboGain = ctx.createGain(); turboGain.gain.value = 0;
+      turboOsc.connect(turboGain); turboGain.connect(ctx.destination);
+      turboOsc.start();
+      // tyre screech + N2O jet: looping noise through filters
       const nb = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate), nd = nb.getChannelData(0);
       for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
       const noise = ctx.createBufferSource(); noise.buffer = nb; noise.loop = true;
       const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1400; bp.Q.value = 6;
       const sq = ctx.createGain(); sq.gain.value = 0;
-      noise.connect(bp); bp.connect(sq); sq.connect(ctx.destination); noise.start();
-      this.audio = { ctx, osc1, osc2, filter, gain, sq, bp };
+      noise.connect(bp); bp.connect(sq); sq.connect(ctx.destination);
+      const nosBp = ctx.createBiquadFilter(); nosBp.type = 'bandpass'; nosBp.frequency.value = 900; nosBp.Q.value = 1.4;
+      const nosGain = ctx.createGain(); nosGain.gain.value = 0;
+      noise.connect(nosBp); nosBp.connect(nosGain); nosGain.connect(ctx.destination);
+      noise.start();
+      this.audio = { ctx, osc1, osc2, filter, gain, sq, bp, turboOsc, turboGain, nosGain };
     }
     if (this.audio) {
-      if (this.soundOn) this.audio.ctx.resume(); else this.audio.gain.gain.value = 0;
+      if (this.soundOn) this.audio.ctx.resume();
+      else {
+        this.audio.gain.gain.value = 0;
+        this.audio.sq.gain.value = 0;
+        this.audio.turboGain.gain.value = 0;
+        this.audio.nosGain.gain.value = 0;
+      }
     }
     return this.soundOn;
   }
 
   updateSound(throttle) {
     if (!this.audio || !this.soundOn) return;
-    const { ctx, osc1, osc2, filter, gain } = this.audio;
+    const { ctx, osc1, osc2, filter, gain, turboOsc, turboGain, nosGain } = this.audio;
     const exSnd = this.car.b?.kit?.exhaustSound || 'sport';
     const loud = exSnd === 'stock' ? 0.05 : exSnd === 'sport' ? 0.10 : 0.14;
     // firing frequency: cylinders/2 pulses per rev (4-cyl = 2, 6-cyl = 3); a rotary fires twice per rev
@@ -384,10 +401,34 @@ export class Driver {
     const bright = exSnd === 'titanium' || exSnd === 'popbang' ? 500 : 280;
     filter.frequency.setTargetAtTime(bright + this.rpm * 0.28 + (throttle ? 440 : 0), ctx.currentTime, 0.05);
     gain.gain.setTargetAtTime(loud * (throttle ? 1 : 0.55), ctx.currentTime, 0.08);
+    // turbo spool
+    const hasTurbo = (this.perf?.turbo || 0) > 0;
+    const spool = hasTurbo && throttle ? Math.max(0, (this.rpm - 2400) / 5000) : 0;
+    turboOsc.frequency.setTargetAtTime(2100 + spool * 2300, ctx.currentTime, 0.08);
+    turboGain.gain.setTargetAtTime(spool * 0.018, ctx.currentTime, 0.08);
+    // N2O whoosh
+    nosGain.gain.setTargetAtTime(this.nosOn ? 0.085 : 0, ctx.currentTime, 0.04);
+    // tyre screech
     const sl = this.vel.length() > 3 || this.burnout ? this.slide || (this.burnout ? 0.6 : 0) : 0;
     this.audio.sq.gain.setTargetAtTime(sl > 0.18 ? Math.min(0.09, (sl - 0.18) * 0.16) : 0, ctx.currentTime, 0.06);
     this.audio.bp.frequency.setTargetAtTime(1100 + sl * 700, ctx.currentTime, 0.1);
     if (this.nosOn) filter.frequency.setTargetAtTime(1850, ctx.currentTime, 0.05);
+    if (this.impact > 2.0 && (!this._impT || ctx.currentTime - this._impT > 0.18)) {
+      this._impT = ctx.currentTime;
+      this.playImpact(Math.min(1, this.impact / 12));
+    }
+  }
+  playImpact(strength = 0.5) {
+    if (!this.audio || !this.soundOn) return;
+    const { ctx } = this.audio;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(95, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(32, ctx.currentTime + 0.14);
+    g.gain.setValueAtTime(0.16 * strength, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime + 0.16);
   }
   playPop(double = false) {
     if (!this.audio || !this.soundOn) return;

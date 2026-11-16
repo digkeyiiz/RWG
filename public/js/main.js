@@ -881,6 +881,15 @@ function updateSkillHud(dt, kmh, slide, impact, rm, cp) {
     skillHudEl.hidden = true;
   }
 }
+const _camDelta = new THREE.Vector3();
+const _camBack = new THREE.Vector3();
+const _camAxis = new THREE.Vector3(0, 1, 0);
+const _camTmp = new THREE.Vector3();
+const _sunOff = new THREE.Vector3(4, 8, 3);
+const gaugeEl = document.getElementById('gauge');
+const speedFxEl = document.getElementById('speedFx');
+const clockEl = document.getElementById('clock');
+const timeSliderEl = document.getElementById('timeSlider');
 function frame(now) {
   requestAnimationFrame(frame);
   if (!gov.tick(now ?? performance.now())) return;
@@ -894,7 +903,7 @@ function frame(now) {
   }
   let night = 0;
   if (mode === 'city' && C) {
-    if (timeAuto) { hour = (hour + dt / 60) % 24; document.getElementById('timeSlider').value = hour; }
+    if (timeAuto) { hour = (hour + dt / 60) % 24; if (timeSliderEl) timeSliderEl.value = hour; }
     night = C.sky.apply(hour, world, VIEW[gfx.get('view')].fog);
     C.weather.update(dt, car.root.position, driver.vel, C.city, C.sky, VIEW[gfx.get('view')].fog);
     C.sky.updateEnv(renderer, hour, C.weather.wet);
@@ -913,20 +922,22 @@ function frame(now) {
     const farWant = Math.max(1500, Math.min(VIEW[gfx.get('view')].far, C.sky.fog.far * 1.03));
     if (Math.abs(camera.far - farWant) > 20) { camera.far = farWant; camera.updateProjectionMatrix(); }
     const hh = Math.floor(hour), mm = Math.floor((hour - hh) * 60);
-    document.getElementById('clock').textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    if (clockEl) clockEl.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
   if (mode === 'drive' || mode === 'city') {
     lastCarPos.copy(car.root.position);
     const s = driver.step(dt);
     car.setDriveLights(s.braking);
     const cp = car.root.position;
-    const delta = cp.clone().sub(lastCarPos);
+    _camDelta.copy(cp).sub(lastCarPos);
     if (inspecting?.car?.root.visible) {
       // showcase: orbit the other player's car
       const tp = inspecting.car.root.position;
-      controls.target.lerp(new THREE.Vector3(tp.x, tp.y + 0.7, tp.z), Math.min(1, dt * 4));
-      const off = camera.position.clone().sub(controls.target);
-      if (off.length() > 9 || off.length() < 4) camera.position.copy(controls.target).add(off.setLength(6.5).setY(Math.max(1.4, off.y)));
+      _camTmp.set(tp.x, tp.y + 0.7, tp.z);
+      controls.target.lerp(_camTmp, Math.min(1, dt * 4));
+      _camTmp.copy(camera.position).sub(controls.target);
+      const len = _camTmp.length();
+      if (len > 9 || len < 4) camera.position.copy(controls.target).add(_camTmp.setLength(6.5).setY(Math.max(1.4, _camTmp.y)));
     } else if (chase) {
       const [cd, ch] = CAM[gfx.get('cam')] || CAM.normal;
       const spd = driver.vel.length();
@@ -937,15 +948,15 @@ function frame(now) {
         const diff = Math.atan2(Math.sin(velHead - camHead), Math.cos(velHead - camHead));
         camHead += THREE.MathUtils.clamp(diff, -0.45, 0.45) * 0.42;
       }
-      const back = new THREE.Vector3(cd - Math.min(0.8, spd * 0.015), ch, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), camHead).add(cp);
-      camera.position.add(delta);
-      camera.position.lerp(back, Math.min(1, dt * 4.8));
+      _camBack.set(cd - Math.min(0.8, spd * 0.015), ch, 0).applyAxisAngle(_camAxis, camHead).add(cp);
+      camera.position.add(_camDelta);
+      camera.position.lerp(_camBack, Math.min(1, dt * 4.8));
       // subtle road-surface vibration at high speed or off-road
       if (spd > 28) {
         const vib = Math.min(0.025, (spd - 28) * 0.0005) * (surfaceMu(cp.x, cp.z) < 1 ? 2.2 : 1);
         camera.position.y += Math.sin(now * 0.045) * vib;
       }
-    } else camera.position.add(delta);
+    } else camera.position.add(_camDelta);
     if (!inspecting) {
       const lookAhead = Math.min(2.2, driver.vel.length() * 0.04);
       controls.target.set(cp.x + Math.cos(driver.heading) * lookAhead, cp.y + 0.82, cp.z - Math.sin(driver.heading) * lookAhead);
@@ -971,7 +982,7 @@ function frame(now) {
           C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, game.icons());
         }
       }
-    } else { sun.position.copy(cp).add(new THREE.Vector3(4, 8, 3)); sun.castShadow = sun.userData.shadowOn; }
+    } else { sun.position.copy(cp).add(_sunOff); sun.castShadow = sun.userData.shadowOn; }
     sun.target.position.copy(cp);
     kmhEl.textContent = Math.round(s.kmh);
     gearEl.textContent = s.gear;
@@ -979,12 +990,10 @@ function frame(now) {
     rpmArc.style.strokeDashoffset = ARC * (1 - rr);
     const isRed = s.rpm > (s.redline || 7000) * 0.92;
     rpmArc.classList.toggle('red', isRed);
-    const gaugeEl = document.getElementById('gauge');
     if (gaugeEl) {
       gaugeEl.classList.toggle('redline', isRed);
       gaugeEl.classList.toggle('nos-on', !!s.nosOn);
     }
-    const speedFxEl = document.getElementById('speedFx');
     if (speedFxEl) {
       const spdAlpha = Math.max(0, Math.min(1, (s.kmh - 115) / 140)) * 0.75 + (s.nosOn ? 0.35 : 0);
       speedFxEl.style.setProperty('--spd', Math.min(1, spdAlpha).toFixed(2));
@@ -1008,7 +1017,6 @@ function frame(now) {
         skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
       }
     } else {
-      const speedFxEl = document.getElementById('speedFx');
       if (speedFxEl) speedFxEl.style.setProperty('--spd', '0');
       if (mode === 'garage') car.updateUnderglow();
       if (!skillHudEl.hidden) { skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0; }

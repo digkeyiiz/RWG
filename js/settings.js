@@ -96,7 +96,9 @@ export function settingsPanel(gfx, toast) {
 export class FrameGovernor {
   constructor(renderer, gfx, el) {
     this.r = renderer; this.gfx = gfx; this.el = el;
-    this.k = 1; this.acc = 0; this.frames = 0; this.t = 0; this.fps = 60; this.last = performance.now(); this.slow = 0; this.fast = 0;
+    this.k = 1; this.acc = 0; this.frames = 0; this.t = 0; this.fps = 60; this.p95Ms = 16.7;
+    this.dts = new Float32Array(60); this.dtIdx = 0;
+    this.last = performance.now(); this.slow = 0; this.fast = 0;
     this.apply();
   }
   pixelRatio() { return Math.min(devicePixelRatio || 1, this.gfx.get('prCap')) * this.gfx.get('scale') * (this.gfx.get('dyn') ? this.k : 1); }
@@ -107,9 +109,13 @@ export class FrameGovernor {
     const dt = now - this.last;
     if (cap && dt < 1000 / cap - 2) return false;
     this.last = now;
+    this.dts[this.dtIdx] = dt;
+    this.dtIdx = (this.dtIdx + 1) % this.dts.length;
     this.frames++; this.t += dt;
     if (this.t >= 1000) {
       this.fps = (this.frames * 1000) / this.t; this.frames = 0; this.t = 0;
+      const sorted = Array.from(this.dts).sort((a, b) => a - b);
+      this.p95Ms = sorted[Math.floor(sorted.length * 0.95)] || 16.7;
       if (this.el) { this.el.hidden = !this.gfx.get('fps'); this.el.textContent = `${Math.round(this.fps)} FPS · ${Math.round(this.pixelRatio() * 100) / 100}x`; }
       if (this.gfx.get('dyn') && !document.hidden) {
         const target = cap || 60;
