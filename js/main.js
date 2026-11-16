@@ -261,12 +261,13 @@ panel.shop = {
   owns: (k) => (online.me ? online.owns(k) : localOwned.has(k)),
   money: () => online.me?.money ?? localMoney,
   maxMoney: async () => {
-    if (online.me) {
+    if (online.me && online.sock?.connected) {
       const r = await online.maxMoney();
       if (!r?.ok) { toast('⚠️ ' + (r?.err || 'เพิ่มเงินไม่สำเร็จ')); return false; }
     } else {
       localMoney = Math.max(localMoney, ECON.START_MONEY);
       saveLocalShop();
+      if (online.me) { online.me.money = Math.max(online.me.money || 0, ECON.START_MONEY); online.emitChange('me'); }
     }
     game.updateWallet(1);
     game.popGain('฿999,999,999', true);

@@ -382,7 +382,8 @@ function attachRooms(httpServer) {
     });
 
     sock.on('garage:maxmoney', async (d = {}, cb) => {
-      if (!w || !p || typeof cb !== 'function') return;
+      if (typeof cb !== 'function') return;
+      if (!w || !p) return cb({ ok: false, err: 'ยังไม่ได้เชื่อมต่อห้อง' });
       const E = await eco;
       const target = E.START_MONEY;
       const cur = Number.isFinite(p.prof.money) ? p.prof.money : 0;
