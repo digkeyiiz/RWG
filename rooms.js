@@ -369,7 +369,6 @@ function attachRooms(httpServer) {
       if (typeof d.rid === 'string' && recent.has(d.rid)) return cb(recent.get(d.rid));
       const E = await eco;
       const done = (r) => { if (typeof d.rid === 'string') { recent.set(d.rid, r); if (recent.size > 30) recent.delete(recent.keys().next().value); } cb(r); };
-      if (!p.garage) return done({ ok: false, err: 'ซื้อของได้เฉพาะในอู่' });
       const key = String(d.key || '');
       const price = E.priceOf(key);
       if (price === null) return done({ ok: false, err: 'ไม่มีสินค้านี้' });

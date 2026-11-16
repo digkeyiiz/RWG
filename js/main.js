@@ -277,7 +277,7 @@ panel.shop = {
     return true;
   },
   buy: async (k) => {
-    if (online.me) {
+    if (online.me && online.sock?.connected) {
       const r = await online.buy(k);
       if (r.ok) { game.updateWallet(-1); game.sound('buy'); }
       return r;
@@ -287,6 +287,11 @@ panel.shop = {
     localMoney -= price;
     localOwned.add(k);
     saveLocalShop();
+    if (online.me) {
+      online.me.money = localMoney;
+      if (!online.me.owned.includes(k)) online.me.owned.push(k);
+      online.emitChange('me');
+    }
     game.updateWallet(-1); game.sound('buy');
     return { ok: true, money: localMoney };
   },
