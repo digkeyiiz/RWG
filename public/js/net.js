@@ -66,6 +66,23 @@ export class Online {
       if (p.snaps.length > 30) p.snaps.splice(0, p.snaps.length - 30);
     });
     sock.on('build', ({ id, build }) => { const p = this.peers.get(id); if (p) { p.build = build; this.buildPeerCar(p); } });
+    sock.on('crew', ({ id, crew }) => {
+      const p = this.peers.get(id);
+      if (p) {
+        p.crew = crew || null;
+        const lbl = p.crew ? `[${p.crew}] ${p.name}` : p.name;
+        const nt = nameTag(lbl);
+        if (p.car) { p.car.root.remove(p.tag); p.car.root.add(nt); }
+        p.tag.material.map.dispose(); p.tag.material.dispose();
+        p.tag = nt;
+        this.emitChange('peers');
+      }
+    });
+    sock.on('car:act', (d) => {
+      const p = this.peers.get(d?.id);
+      if (p?.car && d.kind === 'flash') p.car.flashLights();
+      this.emitChange({ carAct: d });
+    });
     sock.on('chat', (m) => this.emitChange({ chat: m }));
     sock.on('race:start', (d) => this.onRace?.('start', d));
     sock.on('race:p', (d) => this.onRace?.('p', d));
@@ -145,6 +162,12 @@ export class Online {
   owns(key) { return !!this.me?.owned.includes(key); }
   async pick(id) { const d = this.driver; const r = await this.call('pick', { id, at: { x: d.pos.x, y: d.y || 0, z: d.pos.z } }); if (r.ok && this.me) { this.me.money = r.money; this.emitChange('me'); } return r; }
   async garage(id) { const r = await this.call('garage', { id }); if (r.me) this.setMe(r.me); return r; }
+  async maxMoney() {
+    const r = await this.call('garage:maxmoney', {});
+    if (r.me) this.setMe(r.me);
+    else if (r.ok && this.me) { this.me.money = r.money; this.emitChange('me'); }
+    return r;
+  }
   async buy(key) {
     const r = await this.call('buy', { key, rid: Math.random().toString(36).slice(2) + Date.now() });
     if (r.ok && this.me) { this.me.money = r.money; this.me.owned = r.owned; this.emitChange('me'); }
@@ -191,6 +214,9 @@ export class Online {
   raceProgress(p, reliable = false) { if (this.code && this.sock?.connected) (reliable ? this.sock : this.sock.volatile).emit('race:p', p); }
   chat(text) { if (this.code && text.trim()) this.sock.emit('chat', text.trim().slice(0, 120)); }
 
+  async setCrew(tag) { const r = await this.call('crew:set', { tag }); if (r.me) this.setMe(r.me); return r; }
+  carAct(kind) { if (this.code && this.sock?.connected) this.sock.emit('car:act', { kind }); }
+
   sendBuild() {
     if (!this.code) return;
     clearTimeout(this._bt);
@@ -199,7 +225,8 @@ export class Online {
 
   addPeer(p) {
     if (this.peers.has(p.id)) this.removePeer(p.id);
-    const peer = { id: p.id, name: p.name, username: p.username || null, likes: p.likes || 0, rep: p.rep || 0, build: p.build, car: null, tag: nameTag(p.name), snaps: [], lastSpin: 0 };
+    const lbl = p.crew ? `[${p.crew}] ${p.name}` : p.name;
+    const peer = { id: p.id, name: p.name, crew: p.crew || null, username: p.username || null, likes: p.likes || 0, rep: p.rep || 0, build: p.build, car: null, tag: nameTag(lbl), snaps: [], lastSpin: 0 };
     this.peers.set(p.id, peer);
     this.buildPeerCar(peer);
   }

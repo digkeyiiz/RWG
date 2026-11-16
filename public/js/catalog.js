@@ -474,6 +474,15 @@ export const PLATE_STYLES = [
   { id: 'none', name: 'ไม่ติดป้าย', bg: null, fg: null },
 ];
 
+export const EXHAUST_SOUNDS = [
+  { id: 'stock', name: 'นุ่มทุ้ม (OEM)' },
+  { id: 'sport', name: 'สปอร์ต' },
+  { id: 'titanium', name: 'ไทเทเนียม + ไฟออกท่อ' },
+  { id: 'popbang', name: 'ปุ้งปั้ง Pop & Bang 🔥' },
+];
+
+export const SMOKE_COLORS = ['#ffffff', '#38bdf8', '#f43f5e', '#a855f7', '#22c55e', '#facc15', '#ff6a1c', '#18181b'];
+
 export const DEFAULT_BUILD = {
   name: 'คันแรกของฉัน',
   gen: 'gen2',
@@ -484,7 +493,7 @@ export const DEFAULT_BUILD = {
             tireType: 'comfort', tireBrand: 'generic', tireLetters: 'black' },
   glass: { windshield: 40, windshieldFilm: 'black', side: 60, sideFilm: 'black', rear: 60, rearFilm: 'black', visor: false },
   kit: { front: 'oem', side: 'none', rear: 'none', fender: 'none', spoiler: 'none', exhaust: 'oem',
-         exhaustFinish: 'chrome', partColor: 'body', sharkfin: true, hoodMod: 'none', canard: false, towHook: false },
+         exhaustFinish: 'chrome', exhaustSound: 'sport', smokeColor: '#ffffff', partColor: 'body', sharkfin: true, hoodMod: 'none', canard: false, towHook: false },
   lights: { head: false, headTint: 'clear', tailTint: 'red', underglow: 'none', underglowColor: '#00c8ff' },
   suspension: { type: 'oem', drop: 0, dropRear: 0, linked: true, damping: 8, spring: 2.5, airUp: false },
   plate: { style: 'white', line1: 'กข 1234', line2: 'กรุงเทพมหานคร' },

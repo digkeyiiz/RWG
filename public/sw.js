@@ -1,9 +1,9 @@
 // Offline cache: precache the app shell, then cache everything same-origin on first use
 // (so .glb models you add are available offline after the first load).
-const CACHE = 'vios-garage-v48';
+const CACHE = 'vios-garage-v51';
 const CORE = [
   './', 'css/style.css', 'manifest.webmanifest',
-  'js/main.js', 'js/world.js', 'js/car.js', 'js/kit.js', 'js/icons.js', 'js/thumbs.js', 'js/body.js', 'js/wheels.js', 'js/materials.js', 'js/ui.js', 'js/drive.js', 'js/catalog.js', 'js/glbcar.js', 'js/net.js', 'js/onlineui.js', 'js/engine.js', 'js/garage.js', 'js/settings.js', 'js/race.js', 'js/game.js', 'js/economy.js', 'js/places.js', 'js/police.js', 'js/social.js', 'vendor/socket.io/socket.io.esm.min.js', 'vendor/three-mesh-bvh/index.module.js', 'models/vios-gen2-2007.glb',
+  'js/main.js', 'js/world.js', 'js/car.js', 'js/fx.js', 'js/kit.js', 'js/icons.js', 'js/thumbs.js', 'js/body.js', 'js/wheels.js', 'js/materials.js', 'js/ui.js', 'js/drive.js', 'js/catalog.js', 'js/glbcar.js', 'js/net.js', 'js/onlineui.js', 'js/engine.js', 'js/garage.js', 'js/settings.js', 'js/race.js', 'js/game.js', 'js/economy.js', 'js/places.js', 'js/police.js', 'js/social.js', 'vendor/socket.io/socket.io.esm.min.js', 'vendor/three-mesh-bvh/index.module.js', 'models/vios-gen2-2007.glb',
   './models/wheels/enkei-rpf1.glb',
   'vendor/three/three.module.min.js', 'vendor/three/addons/controls/OrbitControls.js', 'vendor/three/addons/loaders/GLTFLoader.js',
   'vendor/three/addons/utils/BufferGeometryUtils.js', 'vendor/three/addons/environments/RoomEnvironment.js', 'vendor/three/addons/objects/Reflector.js', 'vendor/three/addons/modifiers/TessellateModifier.js', 'vendor/three/addons/libs/meshopt_decoder.module.js',

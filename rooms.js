@@ -84,9 +84,9 @@ function attachRooms(httpServer) {
     }
     return null;
   }
-  const pubPlayer = (p) => ({ id: p.id, name: p.name, username: p.prof.username || null, build: p.build, rep: p.prof.rep, likes: p.prof.likes || 0 });
+  const pubPlayer = (p) => ({ id: p.id, name: p.name, crew: p.prof.crew || null, username: p.prof.username || null, build: p.build, rep: p.prof.rep, likes: p.prof.likes || 0 });
   const lobbyList = (w) => [...w.lobbies.values()].map((l) => ({ id: l.id, track: l.track, laps: l.laps, host: l.hostName, hostId: l.host, ids: [...l.members], members: [...l.members].map((sid) => w.players.get(sid)?.name).filter(Boolean), startsIn: Math.max(0, l.t - Date.now()) }));
-  const me = (p) => ({ username: p.prof.username || null, likes: p.prof.likes || 0, friends: (p.prof.friends || []).map(uname).filter(Boolean), requests: (p.prof.freq || []).map(uname).filter(Boolean), money: p.prof.money, rep: p.prof.rep, owned: p.prof.owned, discovered: p.prof.discovered, races: p.prof.races, wins: p.prof.wins, best: p.prof.best, name: p.prof.name, bounty: p.prof.bounty || 0, escapes: p.prof.escapes || 0, busted: p.prof.busted || 0 });
+  const me = (p) => ({ username: p.prof.username || null, crew: p.prof.crew || null, likes: p.prof.likes || 0, friends: (p.prof.friends || []).map(uname).filter(Boolean), requests: (p.prof.freq || []).map(uname).filter(Boolean), money: p.prof.money, rep: p.prof.rep, owned: p.prof.owned, discovered: p.prof.discovered, races: p.prof.races, wins: p.prof.wins, best: p.prof.best, name: p.prof.name, bounty: p.prof.bounty || 0, escapes: p.prof.escapes || 0, busted: p.prof.busted || 0 });
 
   // remove anything a build uses that this player doesn't own (others see what you really own)
   async function sanitize(p, build) {
@@ -112,12 +112,12 @@ function attachRooms(httpServer) {
     w.lobbies.delete(lobby.id);
     const members = [...lobby.members].filter((sid) => w.players.has(sid));
     if (!members.length) return;
-    const race = { id: lobby.id, track: lobby.track, laps: lobby.laps, bots: lobby.bots, members, t0: Date.now() + COUNTDOWN_MS, prog: new Map(), fin: [], seed: Math.floor(Math.random() * 1e9) };
+    const race = { id: lobby.id, track: lobby.track, laps: lobby.laps, bots: lobby.bots, diff: lobby.diff ?? 0, members, t0: Date.now() + COUNTDOWN_MS, prog: new Map(), fin: [], seed: Math.floor(Math.random() * 1e9) };
     w.races.set(race.id, race);
     const host = w.players.get(lobby.host);
     for (const sid of members) {
       const p = w.players.get(sid); p.raceId = race.id;
-      io.to(sid).emit('race:start', { raceId: race.id, cfg: { track: race.track, laps: race.laps, bots: race.bots, diff: 1, traffic: false, seed: race.seed }, grid: members, inMs: COUNTDOWN_MS, by: host?.name || '' });
+      io.to(sid).emit('race:start', { raceId: race.id, cfg: { track: race.track, laps: race.laps, bots: race.bots, diff: race.diff, traffic: false, seed: race.seed }, grid: members, inMs: COUNTDOWN_MS, by: host?.name || '' });
     }
     io.to(w.id).emit('race:lobbies', lobbyList(w));
     log('race start', w.id, race.track, `laps=${race.laps}`, `players=${members.length}`, `bots=${race.bots}`);
@@ -240,6 +240,19 @@ function attachRooms(httpServer) {
       const text = String(t ?? '').replace(/[\u0000-\u001f]/g, '').trim().slice(0, 120);
       if (text) io.to(w.id).emit('chat', { id: sock.id, name: p.name, text });
     });
+    sock.on('crew:set', (d = {}, cb) => {
+      if (!w || typeof cb !== 'function') return;
+      const tag = String(d.tag ?? '').replace(/[^a-zA-Z0-9ก-๙_-]/g, '').trim().slice(0, 6).toUpperCase();
+      p.prof.crew = tag || null;
+      store.touch();
+      io.to(w.id).emit('crew', { id: sock.id, crew: p.prof.crew });
+      cb({ ok: true, crew: p.prof.crew, me: me(p) });
+    });
+    sock.on('car:act', (d = {}) => {
+      if (!w || raceBudget-- <= 0) return;
+      const kind = d.kind === 'horn' || d.kind === 'flash' ? d.kind : null;
+      if (kind) sock.to(w.id).emit('car:act', { id: sock.id, kind, name: p.name });
+    });
 
     // ---- cash: server checks you are really next to it (last pose < 1.5 s old)
     sock.on('pick', (d = {}, cb) => {
@@ -291,6 +304,17 @@ function attachRooms(httpServer) {
       done({ ok: true, money: p.prof.money, owned: p.prof.owned });
     });
 
+    sock.on('garage:maxmoney', async (d = {}, cb) => {
+      if (!w || typeof cb !== 'function') return;
+      if (!p.garage) return cb({ ok: false, err: 'กดรับเงินได้เฉพาะในอู่' });
+      const E = await eco;
+      const target = E.START_MONEY;
+      if (p.prof.money < target) {
+        credit(p, target - p.prof.money, 'garage-grant', { target });
+      }
+      cb({ ok: true, money: p.prof.money, me: me(p) });
+    });
+
     // ---- races started from the open world
     sock.on('race:open', async (d = {}, cb) => {
       if (!w || typeof cb !== 'function') return;
@@ -301,7 +325,8 @@ function attachRooms(httpServer) {
       const track = E.TRACKS[d.track] ? d.track : 'touge';
       const laps = Number.isInteger(d.laps) && d.laps >= 1 && d.laps <= 5 ? d.laps : 1;
       const bots = Number.isInteger(d.bots) && d.bots >= 0 && d.bots <= 5 ? d.bots : 3;
-      const l = { id: nid('r'), host: sock.id, hostName: p.name, track, laps, bots, members: new Set([sock.id]), t: Date.now() + (d.now ? 0 : LOBBY_MS) };
+      const diff = Number.isInteger(d.diff) && d.diff >= 0 && d.diff <= 3 ? d.diff : 0;
+      const l = { id: nid('r'), host: sock.id, hostName: p.name, track, laps, bots, diff, members: new Set([sock.id]), t: Date.now() + (d.now ? 0 : LOBBY_MS) };
       const pt = d.party && partyOf(p.key);
       if (pt) {
         for (const k of pt.members) { const q = presence.get(k); if (q && q.w === w && !q.raceId) { l.members.add(q.id); if (q !== p) io.to(q.id).emit('race:party', { host: p.name, track, laps }); } }

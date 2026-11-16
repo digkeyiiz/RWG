@@ -924,17 +924,24 @@ export class Car {
       s.position.set(this.P.xmax - 0.2, 0.75, z);
       s.target.position.set(this.P.xmax + 8, 0.0, z * 1.5);
     });
-    // underglow
+    // underglow (cached texture so flashing lights causes zero allocation)
     disposeGroup(this.fxGroup);
     if (l.underglow !== 'none') {
       m.underglow.color.set(l.underglowColor);
-      const c = document.createElement('canvas'); c.width = c.height = 128;
-      const g = c.getContext('2d');
-      const grd = g.createRadialGradient(64, 64, 10, 64, 64, 64);
-      grd.addColorStop(0, 'rgba(255,255,255,0.9)'); grd.addColorStop(0.55, 'rgba(255,255,255,0.45)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
-      g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
-      m.underglow.map = new THREE.CanvasTexture(c); m.underglow.needsUpdate = true;
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(this.P.L * 1.25, this.P.W * 1.7), m.underglow);
+      if (!this._ugTex) {
+        const c = document.createElement('canvas'); c.width = c.height = 128;
+        const g = c.getContext('2d');
+        const grd = g.createRadialGradient(64, 64, 6, 64, 64, 64);
+        grd.addColorStop(0, 'rgba(255,255,255,1)');
+        grd.addColorStop(0.38, 'rgba(255,255,255,0.68)');
+        grd.addColorStop(0.7, 'rgba(255,255,255,0.22)');
+        grd.addColorStop(1, 'rgba(255,255,255,0)');
+        g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+        this._ugTex = new THREE.CanvasTexture(c);
+        this._ugTex.colorSpace = THREE.SRGBColorSpace;
+      }
+      m.underglow.map = this._ugTex; m.underglow.needsUpdate = true;
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(this.P.L * 1.32, this.P.W * 1.85), m.underglow);
       plane.rotation.x = -Math.PI / 2; plane.position.y = 0.012;
       plane.renderOrder = 2;
       this.fxGroup.add(plane);
@@ -989,6 +996,35 @@ export class Car {
     this.chassis.rotation.x = roll;
     this.chassis.rotation.z = (this.baseRake || 0) + pitch;
     this.chassis.position.y = (this.baseY || 0) + (this._heave || 0);
+    this.updateUnderglow();
+  }
+  updateUnderglow() {
+    const ug = this.b?.lights?.underglow;
+    if (!ug || ug === 'none') return;
+    const t = performance.now() / 1000;
+    if (ug === 'pulse') {
+      this.m.underglow.color.set(this.b.lights.underglowColor || '#00c8ff');
+      this.m.underglow.opacity = 0.35 + 0.55 * (0.5 + 0.5 * Math.sin(t * 4.2));
+    } else if (ug === 'rainbow') {
+      this.m.underglow.color.setHSL((t * 0.25) % 1, 1, 0.55);
+      this.m.underglow.opacity = 0.85;
+    } else {
+      this.m.underglow.color.set(this.b.lights.underglowColor || '#00c8ff');
+      this.m.underglow.opacity = 0.85;
+    }
+  }
+  flashLights() {
+    if (this._flashing) return;
+    this._flashing = true;
+    const was = !!this.b?.lights?.head;
+    const set = (on) => {
+      this.autoLights = on;
+      this.applyLights();
+    };
+    set(!was);
+    setTimeout(() => set(was), 140);
+    setTimeout(() => set(!was), 280);
+    setTimeout(() => { set(was); this._flashing = false; }, 440);
   }
 
   // ---------------- add-ons ----------------

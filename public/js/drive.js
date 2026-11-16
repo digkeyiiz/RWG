@@ -130,10 +130,23 @@ export class Driver {
       const top = pf.gears.length - 1;
       if (this.gi > top) this.gi = top;
       rpmNow = rpmFor(pf, vf, this.gi, R);
+      const prevGi = this.gi;
       if (this.ctl.trans !== 'manual') {
         if (inp.gas && vf > 0 && rpmNow > pf.redline * 0.97 && this.gi < top) { this.gi++; this.shiftT = 0.22; }
         else if (this.gi > 0 && rpmNow < Math.max(1900, pf.peakTqRpm * 0.5) && rpmFor(pf, vf, this.gi - 1, R) < pf.redline * 0.85) { this.gi--; this.shiftT = 0.12; }
       }
+      const exSnd = this.car.b?.kit?.exhaustSound || 'sport';
+      if (this.gi > prevGi && (exSnd === 'titanium' || exSnd === 'popbang')) {
+        this.onBackfire?.(1.1);
+        this.playPop(exSnd === 'popbang');
+      }
+      if (this._prevGas && !inp.gas && this.rpm > 4200 && (exSnd === 'popbang' || (exSnd === 'titanium' && Math.random() < 0.5))) {
+        this.onBackfire?.(1.2);
+        this.playPop(exSnd === 'popbang');
+        if (pf.turbo > 0) this.playBov();
+      }
+      this._prevGas = !!inp.gas;
+      this.burnout = !!(inp.gas && (inp.hand || (inp.brake && vf > -0.5)) && speed < 12);
       const limiter = rpmNow >= pf.redline;
       const thr = this.shiftT > 0 ? 0 : inp.gas;
       if (inp.gas && vf < -0.5) Fbrake = 9 * m; // gas while rolling backwards = brake
@@ -361,17 +374,63 @@ export class Driver {
   updateSound(throttle) {
     if (!this.audio || !this.soundOn) return;
     const { ctx, osc1, osc2, filter, gain } = this.audio;
-    const loud = this.car.b.kit.exhaust === 'oem' ? 0.06 : 0.12;
+    const exSnd = this.car.b?.kit?.exhaustSound || 'sport';
+    const loud = exSnd === 'stock' ? 0.05 : exSnd === 'sport' ? 0.10 : 0.14;
     // firing frequency: cylinders/2 pulses per rev (4-cyl = 2, 6-cyl = 3); a rotary fires twice per rev
     const fire = this.perf ? (this.perf.rotary ? 2 : this.perf.cyl / 2) : 2;
     const f = this.rpm / 60 * fire;
     osc1.frequency.setTargetAtTime(f, ctx.currentTime, 0.05);
     osc2.frequency.setTargetAtTime(f / 2, ctx.currentTime, 0.05);
-    filter.frequency.setTargetAtTime(300 + this.rpm * 0.25 + (throttle ? 400 : 0), ctx.currentTime, 0.05);
+    const bright = exSnd === 'titanium' || exSnd === 'popbang' ? 500 : 280;
+    filter.frequency.setTargetAtTime(bright + this.rpm * 0.28 + (throttle ? 440 : 0), ctx.currentTime, 0.05);
     gain.gain.setTargetAtTime(loud * (throttle ? 1 : 0.55), ctx.currentTime, 0.08);
-    const sl = this.vel.length() > 3 ? this.slide || 0 : 0;
+    const sl = this.vel.length() > 3 || this.burnout ? this.slide || (this.burnout ? 0.6 : 0) : 0;
     this.audio.sq.gain.setTargetAtTime(sl > 0.18 ? Math.min(0.09, (sl - 0.18) * 0.16) : 0, ctx.currentTime, 0.06);
     this.audio.bp.frequency.setTargetAtTime(1100 + sl * 700, ctx.currentTime, 0.1);
-    if (this.nosOn) filter.frequency.setTargetAtTime(1800, ctx.currentTime, 0.05);
+    if (this.nosOn) filter.frequency.setTargetAtTime(1850, ctx.currentTime, 0.05);
+  }
+  playPop(double = false) {
+    if (!this.audio || !this.soundOn) return;
+    const { ctx } = this.audio;
+    const burst = (delay) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sawtooth'; o.frequency.setValueAtTime(140, ctx.currentTime + delay);
+      o.frequency.exponentialRampToValueAtTime(45, ctx.currentTime + delay + 0.09);
+      g.gain.setValueAtTime(0.18, ctx.currentTime + delay);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + delay + 0.1);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(ctx.currentTime + delay); o.stop(ctx.currentTime + delay + 0.11);
+    };
+    burst(0);
+    if (double) burst(0.09);
+  }
+  playBov() {
+    if (!this.audio || !this.soundOn) return;
+    const { ctx } = this.audio;
+    const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.22), ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const src = ctx.createBufferSource(); src.buffer = buf;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 2600; bp.Q.value = 3;
+    const g = ctx.createGain(); g.gain.value = 0.09;
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.start();
+  }
+  playHorn() {
+    try {
+      const ctx = this.audio?.ctx || this._hornCtx || (this._hornCtx = new (window.AudioContext || window.webkitAudioContext)());
+      if (ctx.state === 'suspended') ctx.resume();
+      for (const freq of [420, 525]) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = 'sawtooth'; o.frequency.value = freq;
+        const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400;
+        g.gain.setValueAtTime(0.001, ctx.currentTime);
+        g.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.02);
+        g.gain.setValueAtTime(0.08, ctx.currentTime + 0.18);
+        g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.24);
+        o.connect(f); f.connect(g); g.connect(ctx.destination);
+        o.start(); o.stop(ctx.currentTime + 0.25);
+      }
+    } catch {}
   }
 }

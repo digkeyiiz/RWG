@@ -1,6 +1,6 @@
 // Customization panel (Thai UI). Calls onChange(section) after mutating the build.
 import * as THREE from 'three';
-import { GENERATIONS, PAINT_FINISHES, EXTRA_COLORS, WHEEL_STYLES, WHEEL_FINISHES, FILM_TYPES, KIT, PLATE_STYLES, ADDONS, DEFAULT_BUILD, KIT_PACKAGES, WHEEL_BRANDS, TIRE_BRANDS, SHOCK_TYPES, LIVERIES, LIVERY_COLORS } from './catalog.js';
+import { GENERATIONS, PAINT_FINISHES, EXTRA_COLORS, WHEEL_STYLES, WHEEL_FINISHES, FILM_TYPES, KIT, PLATE_STYLES, ADDONS, DEFAULT_BUILD, KIT_PACKAGES, WHEEL_BRANDS, TIRE_BRANDS, SHOCK_TYPES, LIVERIES, LIVERY_COLORS, EXHAUST_SOUNDS, SMOKE_COLORS } from './catalog.js';
 import { RIMS, RIM_WIDTHS, TIRE_WIDTHS, ASPECTS, TIRE_SIZES, TIRE_TYPES, autoAspect, buildWheel } from './wheels.js';
 import { normalizeEngine, computePerf, simulateRun, ENGINES, PARTS, carSpec, engineById } from './engine.js';
 import { priceOf, carKey, engKey, partKey, buildKeys } from './economy.js';
@@ -9,7 +9,7 @@ import { Thumbs } from './thumbs.js';
 import { getWheelModel } from './glbcar.js';
 
 const TABS = [
-  { id: 'gen', icon: '🚗', name: 'รถ' },
+  { id: 'gen', icon: '🚗', name: 'อู่/รุ่นรถ' },
   { id: 'paint', icon: '🎨', name: 'สี/ลาย' },
   { id: 'wheels', icon: '⚙️', name: 'ล้อ/ยาง' },
   { id: 'kit', icon: '🛠️', name: 'ชุดแต่ง' },
@@ -77,6 +77,19 @@ export class Panel {
     if (n && g) n.textContent = g.name;
     if (u) u.disabled = !this.hist.length;
     if (r) r.disabled = !this.redo.length;
+    let strip = document.getElementById('perfStrip');
+    if (!strip) {
+      strip = el('div', { id: 'perfStrip', class: 'perf-strip' });
+      document.getElementById('pHead')?.after(strip);
+    }
+    const pf = computePerf(this.b), sim = simulateRun(pf);
+    const rt = pf.rating;
+    strip.innerHTML = `<span class="ps-cls" style="--pc:${rt.color}">${rt.cls} ${rt.pi}</span>
+      <span><b>${Math.round(pf.peakHp)}</b> HP</span>
+      <span>0-100 <b>${sim.t100.toFixed(1)}s</b></span>
+      <span>Top <b>${Math.round(sim.vmax)}</b></span>
+      <button class="ps-test" title="ทดสอบขับ / จับเวลา 0-100 และ 402 ม.">🧪 เทสรถ</button>`;
+    strip.querySelector('.ps-test').onclick = () => this.onTestDrive?.();
   }
   resetHistory() { this.hist = []; this.redo = []; this.updateHead(); }
   pushHistory(section) {
@@ -212,6 +225,27 @@ export class Panel {
 
   // ---------- tabs ----------
   tab_gen() {
+    const money = this.shop?.money?.() ?? 0;
+    this.body.append(el('div', { class: 'garage-wallet' },
+      el('div', {}, el('span', { class: 'gw-lbl' }, 'เงินในกระเป๋า'), el('span', { class: 'gw-val' }, `฿${money.toLocaleString()}`)),
+      el('button', { class: 'gw-btn', onclick: async () => { await this.shop?.maxMoney?.(); } }, '💰 เพิ่มตัง 999,999,999')));
+
+    const savedCars = (this.garage?.list?.() || []).filter((b) => GENERATIONS.some((g) => g.id === b.gen && (g.glb || g.featured)));
+    if (savedCars.length) {
+      this.h('🔧 รถในอู่ของคุณ', `${savedCars.length} คัน`);
+      const gbox = el('div', { class: 'cards' });
+      for (const b of savedCars) {
+        const g = GENERATIONS.find((x) => x.id === b.gen);
+        if (!g) continue;
+        const pf = computePerf(b);
+        const dot = el('i', { class: 'cdot', style: `background:${b.paint?.color || '#fff'}` });
+        gbox.append(el('button', { class: 'card' + (g.id === this.b.gen ? ' on' : ''), onclick: () => this.onSwitchCar?.(g.id) },
+          el('div', { class: 't' }, el('span', {}, dot, g.name), el('span', { class: 'own' }, g.id === this.b.gen ? '✓ กำลังใช้อยู่' : 'สลับคัน')),
+          el('div', { class: 's hp' }, `🔥 ${pf.engine.name} · ${Math.round(pf.peakHp)} แรงม้า · ${carSpec(g.id).drive}`)));
+      }
+      this.body.append(gbox);
+    }
+
     let lastModel = null, box = null;
     for (const g of GENERATIONS.filter((x) => x.glb || x.featured)) {
       const model = `${g.make || 'Toyota'} ${g.model || 'Vios'}`;
@@ -406,7 +440,7 @@ export class Panel {
     this.chips('โคมไฟหน้า', [{ id: 'clear', name: 'ใส (เดิม)' }, { id: 'smoke', name: 'รมดำ' }], l.headTint, (id) => this.set('lights', (b) => { b.lights.headTint = id; }, true, 'front'));
     this.chips('โคมไฟท้าย', [{ id: 'red', name: 'แดง (เดิม)' }, { id: 'smoke', name: 'รมดำ' }, { id: 'clear', name: 'ขาวใส' }], l.tailTint, (id) => this.set('lights', (b) => { b.lights.tailTint = id; }, true, 'rear'));
     this.h('ไฟใต้ท้องรถ (Underglow)');
-    this.chips(null, [{ id: 'none', name: 'ปิด' }, { id: 'on', name: 'เปิด' }], l.underglow, (id) => this.set('lights', (b) => { b.lights.underglow = id; }, true));
+    this.chips(null, [{ id: 'none', name: 'ปิด' }, { id: 'on', name: 'นิ่ง' }, { id: 'pulse', name: 'กระพริบ' }, { id: 'rainbow', name: 'สายรุ้ง RGB' }], l.underglow, (id) => this.set('lights', (b) => { b.lights.underglow = id; }, true));
     this.swatches(['#00c8ff', '#7a5cff', '#ff2bd6', '#ff2b2b', '#2bff88', '#ffffff', '#ffb000', '#00ffd5'], l.underglowColor, (c) => this.set('lights', (b) => { b.lights.underglowColor = c; }, true));
   }
 
@@ -479,6 +513,9 @@ export class Panel {
     this.h('ท่อไอเสีย');
     this.tiles(KIT.exhaust, k.exhaust, (id) => this.set('kit', (b) => { b.kit.exhaust = id; b.kitPackage = null; }, true, 'rear'), { cols: 3, icon: (it) => KIT_ICONS.exhaust[it.id], label: (it) => it.name });
     this.chips('ผิวปลายท่อ', KIT.exhaustFinish, k.exhaustFinish, (id) => this.set('kit', (b) => { b.kit.exhaustFinish = id; }, true, 'rear'));
+    this.chips('เสียงท่อ & ไฟออกท่อ', EXHAUST_SOUNDS, k.exhaustSound || 'sport', (id) => this.set('kit', (b) => { b.kit.exhaustSound = id; }, true, 'rear'));
+    this.h('💨 สีควันยางดริฟต์');
+    this.swatches(SMOKE_COLORS, k.smokeColor || '#ffffff', (c) => this.set('kit', (b) => { b.kit.smokeColor = c; }, true), 8);
 
     this.h('สีชิ้นส่วนชุดแต่ง');
     const ball = { body: () => `background:${this.b.paint.color}`, black: () => 'background:radial-gradient(circle at 32% 26%,#555,#0a0a0c 60%)', matte: () => 'background:#1c1d20', carbon: () => 'background:repeating-linear-gradient(45deg,#0c0d0f 0 3px,#2c3036 3px 6px)' };

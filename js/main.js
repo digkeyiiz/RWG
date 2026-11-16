@@ -15,6 +15,7 @@ import { GameWorld } from './game.js';
 import { Social } from './social.js';
 import * as ECON from './economy.js';
 import { GARAGES } from './places.js';
+import { CarFX } from './fx.js';
 
 // a stock build of a car, with that car's factory tyre size
 function freshBuild(genId) {
@@ -76,6 +77,12 @@ const panel = new Panel(() => build, (section) => {
   online?.sendBuild();
 }, car, toast);
 panel.onReplace = (nb) => { build = nb; car.setBuild(build); updateCredit(); persist(); online?.sendBuild(); };
+panel.onTestDrive = async () => {
+  document.body.classList.remove('garage');
+  await setMode('drive');
+  resetDragTest();
+  toast('🧪 สนามทดสอบ: เหยียบคันเร่งเพื่อจับเวลา 0-100 และ 402 ม.');
+};
 // switching cars: park the current one in the garage, take the other one out exactly as it was left
 panel.onSwitchCar = async (genId) => {
   if (genId === build.gen) return;
@@ -157,11 +164,13 @@ document.getElementById('btnFull').onclick = () => {
 // ---------- modes ----------
 driver = new Driver(car, world);
 driver.setPerf(computePerf(build));
+const carFx = new CarFX(scene);
+driver.onBackfire = (s) => carFx.triggerBackfire(s);
 online = new Online({ scene, driver, getBuild: () => build, toast });
 const race = new Race({
   scene, driver, online, toast, gfx, getBuild: () => build,
   hooks: {
-    enterCity: async () => { if (mode !== 'city') await setMode('city'); },
+    enterCity: async () => { if (cityMap !== 'bkk') await switchCityMap('bkk'); if (mode !== 'city') await setMode('city'); },
     spawn: (sp) => spawnRaw(sp),
     setTraffic: (v) => { raceTraffic = v; syncTraffic(); },
     reward: (res) => { game.updateWallet(res.prize); if (res.prize) { game.popGain('+฿' + res.prize.toLocaleString(), true); game.sound('big'); } game.feed(`🏆 ได้รางวัล <b>฿${res.prize.toLocaleString()}</b> · +${res.rep} REP`, 'gold'); },
@@ -198,12 +207,38 @@ const game = new GameWorld({
     chased: () => false,
     hide: () => true,
     localMoney: () => localMoney,
+    warpMarker: async (m) => {
+      if (cityMap !== 'bkk') await switchCityMap('bkk');
+      if (mode !== 'city') await setMode('city');
+      if (m.kind === 'garage') {
+        spawnRaw(garageSpawn(m));
+        toast(`🚀 วาร์ปถึง ${m.name}`);
+      } else if (m.kind === 'race') {
+        spawnRaw({ x: m.x, y: m.y, z: m.z, heading: 0 });
+        race.openSetup(m.id);
+      }
+    },
   },
 });
 const police = null;
 panel.shop = {
   owns: (k) => (online.me ? online.owns(k) : localOwned.has(k)),
   money: () => online.me?.money ?? localMoney,
+  maxMoney: async () => {
+    if (online.me) {
+      const r = await online.maxMoney();
+      if (!r?.ok) { toast('⚠️ ' + (r?.err || 'เพิ่มเงินไม่สำเร็จ')); return false; }
+    } else {
+      localMoney = Math.max(localMoney, ECON.START_MONEY);
+      saveLocalShop();
+    }
+    game.updateWallet(1);
+    game.popGain('฿999,999,999', true);
+    game.sound('big');
+    toast('💰 เพิ่มเงินเป็น ฿999,999,999 แล้ว!');
+    panel.refresh();
+    return true;
+  },
   buy: async (k) => {
     if (online.me) {
       const r = await online.buy(k);
@@ -438,6 +473,8 @@ async function setMode(m, spawn = null) {
   hud.hidden = !driving;
   touchEl.hidden = !driving || !isTouch;
   cityHud.hidden = m !== 'city';
+  document.getElementById('btnBackGarage').hidden = m !== 'drive';
+  document.getElementById('dragHud').hidden = m !== 'drive';
   if (m !== 'city' && race.active) race.abort('ออกจากการแข่งขัน');
   if (C) { C.sky.group.visible = m === 'city'; C.weather.lines.visible = m === 'city' && gfx.get('weather') === 'rain'; }
   syncTraffic();
@@ -538,21 +575,81 @@ document.getElementById('btnSafehouse').onclick = () => {
   else spawnAt(garageSpawn(GARAGES[0]));
 };
 // ---------- garages: the showroom is the inside of the garage you drove into ----------
+let savedCityPose = null;
 async function enterGarage(m) {
+  if (m.id !== 'showroom') savedCityPose = null;
   inGarage = m;
   await setMode('garage');
   document.body.classList.add('garage');
+  document.getElementById('panel')?.classList.remove('collapsed');
   document.getElementById('garageName').textContent = `🔧 ${m.name}`;
   panel.show('gen');
 }
 document.getElementById('btnExitGarage').onclick = async () => {
   const g = GARAGES.find((x) => x.id === inGarage?.id) || GARAGES[0];
+  const backPose = inGarage?.id === 'showroom' ? savedCityPose : null;
+  savedCityPose = null;
   online.garage(null);
   inGarage = null;
   document.body.classList.remove('garage');
-  await setMode('city', garageSpawn(g));
+  await setMode('city', backPose || garageSpawn(g));
 };
-addEventListener('keydown', (e) => { if (e.code === 'KeyR' && e.target.tagName !== 'INPUT' && (mode === 'city' || mode === 'drive')) document.getElementById('btnResetCar').click(); });
+const openShowroom = () => {
+  if (mode === 'garage') return;
+  if (race.active) race.abort('เข้าอู่');
+  savedCityPose = mode === 'city' ? { x: driver.pos.x, y: driver.y || 0, z: driver.pos.z, heading: driver.heading } : null;
+  enterGarage({ id: 'showroom', name: 'อู่กลาง & โชว์รูม' });
+};
+document.getElementById('btnOpenGarage').onclick = openShowroom;
+document.getElementById('btnMaxMoney').onclick = () => panel.shop.maxMoney();
+document.getElementById('btnQuickRace').onclick = async () => {
+  await ensureCity();
+  if (cityMap !== 'bkk') await switchCityMap('bkk');
+  race.openSetup();
+};
+const goCarMeet = async () => {
+  if (race.active) race.abort('ไป Car Meet');
+  await ensureCity();
+  if (cityMap !== 'bkk') await switchCityMap('bkk');
+  if (mode !== 'city') await setMode('city');
+  const slot = online?.inRoom ? (online.peers.size % 8) : 0;
+  const ang = -Math.PI / 2 + (slot - 3.5) * 0.28;
+  const r = 14;
+  spawnRaw({ x: 352 + Math.cos(ang) * r, y: 0, z: -150 + Math.sin(ang) * r, heading: -ang + Math.PI });
+  car.setAutoLights(true);
+  toast('✨ ยินดีต้อนรับสู่ Car Meet ใต้ทางด่วนดินแดง!');
+};
+document.getElementById('btnCarMeet').onclick = goCarMeet;
+const doHorn = () => { driver.playHorn(); online?.carAct('horn'); };
+const doFlash = () => { car.flashLights(); online?.carAct('flash'); };
+document.getElementById('btnHorn').onclick = doHorn;
+document.getElementById('btnFlash').onclick = doFlash;
+document.getElementById('btnBackGarage').onclick = () => {
+  enterGarage(inGarage || { id: 'showroom', name: 'อู่กลาง & โชว์รูม' });
+};
+const dragHud = document.getElementById('dragHud');
+const dragState = { active: false, t0: 0, t100: null, t402: null, dist: 0, best100: null, best402: null };
+function resetDragTest() {
+  dragState.active = false; dragState.t0 = 0; dragState.t100 = null; dragState.t402 = null; dragState.dist = 0;
+  if (dragHud) dragHud.innerHTML = `<span>0-100: <b>--</b></span><span>402m: <b>--</b></span>${dragState.best402 ? `<span>ดีสุด: <b>${dragState.best402.toFixed(2)}s</b></span>` : ''}`;
+}
+function updateDragTest(dt, kmh, spd) {
+  if (!dragState.active && spd > 0.8) { dragState.active = true; dragState.t0 = performance.now() / 1000; dragState.t100 = null; dragState.t402 = null; dragState.dist = 0; }
+  if (!dragState.active) return;
+  if (spd < 0.3 && dragState.dist > 5) { resetDragTest(); return; }
+  dragState.dist += spd * dt;
+  const el = performance.now() / 1000 - dragState.t0;
+  if (dragState.t100 === null && kmh >= 100) { dragState.t100 = el; if (!dragState.best100 || el < dragState.best100) dragState.best100 = el; toast(`⚡ 0-100 กม./ชม.: ${el.toFixed(2)} วินาที!`); }
+  if (dragState.t402 === null && dragState.dist >= 402) { dragState.t402 = el; if (!dragState.best402 || el < dragState.best402) dragState.best402 = el; toast(`🏁 402 เมตร: ${el.toFixed(2)} วินาที!`); }
+  if (dragHud) dragHud.innerHTML = `<span>0-100: <b>${dragState.t100 != null ? dragState.t100.toFixed(2) + 's' : (kmh >= 1 ? el.toFixed(1) + 's' : '--')}</b></span><span>402m (${Math.min(402, Math.round(dragState.dist))}m): <b>${dragState.t402 != null ? dragState.t402.toFixed(2) + 's' : el.toFixed(1) + 's'}</b></span>`;
+}
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'KeyG' && (mode === 'city' || mode === 'drive')) openShowroom();
+  if (e.code === 'KeyH' && (mode === 'city' || mode === 'drive')) doHorn();
+  if (e.code === 'KeyL' && (mode === 'city' || mode === 'drive')) doFlash();
+  if (e.code === 'KeyR' && (mode === 'city' || mode === 'drive')) { if (mode === 'drive') resetDragTest(); document.getElementById('btnResetCar').click(); }
+});
 const btnSound = document.getElementById('btnSound');
 btnSound.onclick = () => { const on = driver.toggleSound(); btnSound.textContent = on ? '🔊 เสียง' : '🔇 เสียง'; };
 const btnChase = document.getElementById('btnChase');
@@ -560,7 +657,7 @@ btnChase.onclick = () => { chase = !chase; btnChase.classList.toggle('on', chase
 // R: back onto the road (race: at your progress · touge: nearest road point · city: upright where you are)
 document.getElementById('btnResetCar').onclick = () => {
   if (race.respawn()) return;
-  if (mode !== 'city') { driver.reset(); return; }
+  if (mode !== 'city') { driver.reset(); resetDragTest(); return; }
   const p = driver.pos;
   const rm = activeRealMap();
   if (rm) {
@@ -833,7 +930,14 @@ function frame(now) {
     } else if (chase) {
       const [cd, ch] = CAM[gfx.get('cam')] || CAM.normal;
       const spd = driver.vel.length();
-      const back = new THREE.Vector3(cd - Math.min(0.8, spd * 0.015), ch, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), driver.heading).add(cp);
+      // NFS-style drift camera swing: slightly lag behind velocity angle so drifting shows the car's side profile
+      let camHead = driver.heading;
+      if (spd > 6 && (driver.slide || 0) > 0.12) {
+        const velHead = Math.atan2(-driver.vel.z, driver.vel.x);
+        const diff = Math.atan2(Math.sin(velHead - camHead), Math.cos(velHead - camHead));
+        camHead += THREE.MathUtils.clamp(diff, -0.45, 0.45) * 0.42;
+      }
+      const back = new THREE.Vector3(cd - Math.min(0.8, spd * 0.015), ch, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), camHead).add(cp);
       camera.position.add(delta);
       camera.position.lerp(back, Math.min(1, dt * 4.8));
       // subtle road-surface vibration at high speed or off-road
@@ -873,12 +977,24 @@ function frame(now) {
     gearEl.textContent = s.gear;
     const rr = Math.min(1, s.rpm / ((s.redline || 7000) * 1.08));
     rpmArc.style.strokeDashoffset = ARC * (1 - rr);
-    rpmArc.classList.toggle('red', s.rpm > (s.redline || 7000) * 0.92);
+    const isRed = s.rpm > (s.redline || 7000) * 0.92;
+    rpmArc.classList.toggle('red', isRed);
+    const gaugeEl = document.getElementById('gauge');
+    if (gaugeEl) {
+      gaugeEl.classList.toggle('redline', isRed);
+      gaugeEl.classList.toggle('nos-on', !!s.nosOn);
+    }
+    const speedFxEl = document.getElementById('speedFx');
+    if (speedFxEl) {
+      const spdAlpha = Math.max(0, Math.min(1, (s.kmh - 115) / 140)) * 0.75 + (s.nosOn ? 0.35 : 0);
+      speedFxEl.style.setProperty('--spd', Math.min(1, spdAlpha).toFixed(2));
+    }
     // speed widens the view a little (sense of speed) — capped so it never hurts precision
     nosBar.hidden = s.nos === null;
     if (s.nos !== null) { nosI.style.width = `${Math.round(s.nos * 100)}%`; nosBar.classList.toggle('on', !!s.nosOn); }
     const fov = baseFov() + (gfx.get('fovKick') ? Math.min(9, s.kmh * 0.045) + (s.nosOn ? 5 : 0) : 0);
     if (Math.abs(camera.fov - fov) > 0.05) { camera.fov += (fov - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix(); }
+      if (mode === 'drive') updateDragTest(dt, s.kmh, driver.vel.length());
       if (mode === 'city' && C) {
         const rm = activeRealMap();
         if ((roadT -= dt) <= 0) {
@@ -891,9 +1007,13 @@ function frame(now) {
       } else if (!skillHudEl.hidden) {
         skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
       }
-    } else if (!skillHudEl.hidden) {
-      skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0;
+    } else {
+      const speedFxEl = document.getElementById('speedFx');
+      if (speedFxEl) speedFxEl.style.setProperty('--spd', '0');
+      if (mode === 'garage') car.updateUnderglow();
+      if (!skillHudEl.hidden) { skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0; }
     }
+    carFx.update(dt, (mode === 'drive' || mode === 'city') ? car : null, driver, gfx.get('preset'));
     online.update(dt, mode, night);
     controls.update(dt);
     if (mode === 'city' && C && gfx.get('bloom')) { C.bloom.strength = 0.12 + night * 0.38; C.bloom.threshold = 0.92; C.bloom.radius = 0.35; C.grade.setState({ time: performance.now() / 1000, night, wet: C.weather.wet, speed: driver.vel.length() / 80 }); C.composer.render(dt); }
@@ -928,7 +1048,10 @@ function frame(now) {
       endInspect: () => { inspecting = null; online.inspectingId = null; driver.frozen = false; document.body.classList.remove('inspecting'); controls.autoRotate = false; },
     },
   });
-  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p) });
+  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet });
+  online.on((ev) => {
+    if (ev?.carAct?.kind === 'horn') { driver.playHorn(); }
+  });
 
   // ---------- instant entry: start straight in the game, connect online in background ----------
   const ttName = document.getElementById('ttName'), ttGo = document.getElementById('ttGo'), ttStatus = document.getElementById('ttStatus');

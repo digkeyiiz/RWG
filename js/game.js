@@ -72,8 +72,33 @@ export class GameWorld {
     $('btnMap').onclick = () => this.toggleMap();
     $('btnProfile').onclick = () => this.openProfile();
     $('worldMap').onclick = (e) => { if (e.target.id === 'worldMap' || e.target.classList.contains('wm-x')) this.toggleMap(false); };
+    const cv = $('wmCanvas');
+    cv.addEventListener('mousemove', (e) => {
+      const hit = this._hitMapPin(e);
+      cv.style.cursor = hit ? 'pointer' : 'default';
+    });
+    cv.addEventListener('click', (e) => {
+      const hit = this._hitMapPin(e);
+      if (hit) this._warpToMarker(hit);
+    });
     $('profile').onclick = (e) => { if (e.target.id === 'profile' || e.target.classList.contains('wm-x')) $('profile').hidden = true; };
     this.updateWallet();
+  }
+  _hitMapPin(e) {
+    if (!this._mapPins?.length) return null;
+    const cv = this.$('wmCanvas'), r = cv.getBoundingClientRect();
+    const cx = (e.clientX - r.left) * (cv.width / r.width), cy = (e.clientY - r.top) * (cv.height / r.height);
+    let best = null, bd = 24 * 24;
+    for (const pin of this._mapPins) {
+      const d = (pin.cx - cx) ** 2 + (pin.cy - cy) ** 2;
+      if (d < bd) { bd = d; best = pin.m; }
+    }
+    return best;
+  }
+  _warpToMarker(m) {
+    if (this.race.active) { this.toast('ออกจากการแข่งก่อนวาร์ป'); return; }
+    this.toggleMap(false);
+    this.hooks.warpMarker?.(m);
   }
   updateWallet(delta = 0) {
     const m = this.online.me;
@@ -349,13 +374,23 @@ export class GameWorld {
     // the minimap base covers ±1650 m
     const B = mm.base, s = B.width / 3300;
     g.drawImage(B, (x0 + 1650) * s, (z0 + 1650) * s, (x1 - x0) * s, (z1 - z0) * s, ox, oz, (x1 - x0) * k, (z1 - z0) * k);
-    for (const ic of this.icons()) {
-      const [x, y] = P(ic.x, ic.z);
-      if (ic.kind === 'cash' || ic.kind === 'big') continue; // money is a surprise on the big map
-      g.font = '700 22px Kanit, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillStyle = ic.kind === 'race' ? '#ff4f6d' : ic.hidden ? '#c56bff' : '#4cc3ff';
-      g.beginPath(); g.arc(x, y, 13, 0, Math.PI * 2); g.fill();
-      g.fillStyle = '#fff'; g.font = '700 14px sans-serif'; g.fillText(ic.kind === 'race' ? '🏁' : '🔧', x, y + 1);
+    this._mapPins = [];
+    for (const m of this.markers) {
+      if (m.kind !== 'race' && !m.found) continue;
+      const [x, y] = P(m.x, m.z);
+      this._mapPins.push({ cx: x, cy: y, m });
+      g.fillStyle = m.kind === 'race' ? '#ff4f6d' : m.hidden ? '#c56bff' : '#4cc3ff';
+      g.strokeStyle = '#fff'; g.lineWidth = 2.5;
+      g.beginPath(); g.arc(x, y, 14, 0, Math.PI * 2); g.fill(); g.stroke();
+      g.fillStyle = '#fff'; g.font = '700 14px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(m.kind === 'race' ? '🏁' : '🔧', x, y + 1);
+      g.font = '700 13px Kanit, sans-serif';
+      g.fillStyle = 'rgba(8,10,14,0.8)';
+      const lbl = m.name.replace(/\s*\(.*?\)/g, '');
+      const tw = g.measureText(lbl).width + 10;
+      g.fillRect(x - tw / 2, y + 17, tw, 18);
+      g.fillStyle = '#fff';
+      g.fillText(lbl, x, y + 26);
     }
     for (const p of this.online.peers.values()) if (p.pose) { const [x, y] = P(p.pose.x, p.pose.z); g.fillStyle = '#ffb02e'; g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.fill(); g.fillStyle = '#fff'; g.font = '600 13px Kanit'; g.fillText(p.name, x, y - 14); }
     const me = this.driver.pos;
@@ -363,8 +398,20 @@ export class GameWorld {
     g.save(); g.translate(mx, my); g.rotate(-this.driver.heading + Math.PI / 2);
     g.fillStyle = '#4cc3ff'; g.strokeStyle = '#000'; g.lineWidth = 2; g.beginPath(); g.moveTo(0, -13); g.lineTo(9, 10); g.lineTo(0, 5); g.lineTo(-9, 10); g.closePath(); g.fill(); g.stroke();
     g.restore();
+    const qb = this.$('wmQuick');
+    if (qb) {
+      qb.innerHTML = '';
+      for (const m of this.markers) {
+        if (m.kind !== 'race' && !m.found) continue;
+        const btn = document.createElement('button');
+        btn.className = m.kind === 'race' ? 'r' : 'g';
+        btn.textContent = (m.kind === 'race' ? '🏁 ' : '🔧 ') + m.name.replace(/\s*\(.*?\)/g, '');
+        btn.onclick = () => this._warpToMarker(m);
+        qb.append(btn);
+      }
+    }
     const found = this.markers.filter((m) => m.kind === 'garage' && m.hidden && m.found).length, hid = this.markers.filter((m) => m.kind === 'garage' && m.hidden).length;
-    this.$('wmInfo').innerHTML = `🔧 อู่ · 🟣 อู่ลับที่เจอแล้ว ${found}/${hid} · 🏁 จุดแข่ง · 🟠 ผู้เล่น · เงินซ่อนอยู่ตามถนน ทางด่วน และภูเขา — ต้องขับไปหาเอง`;
+    this.$('wmInfo').innerHTML = `คลิกไอคอนบนแผนที่หรือปุ่มด้านบนเพื่อวาร์ปทันที · 🟣 อู่ลับที่เจอแล้ว ${found}/${hid} · 🟠 ผู้เล่นอื่น`;
   }
   async openProfile() {
     const el = this.$('profile'), m = this.online.me;

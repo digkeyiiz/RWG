@@ -99,6 +99,9 @@ export function createWorld(canvas, opts = {}) {
   const spot1 = new THREE.SpotLight('#ffffff', 60, 20, 0.6, 0.6, 1.5);
   spot1.position.set(-4, 5, -3); spot1.target.position.set(0, 0.5, 0);
   garage.add(spot1, spot1.target);
+  const spot2 = new THREE.SpotLight('#7dd3fc', 38, 18, 0.65, 0.7, 1.4);
+  spot2.position.set(4.5, 3.8, 3.8); spot2.target.position.set(0, 0.4, 0);
+  garage.add(spot2, spot2.target);
   scene.add(garage);
 
   // ---------- test track ----------

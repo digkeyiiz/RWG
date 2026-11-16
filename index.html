@@ -18,7 +18,8 @@
 
   <header id="topbar">
     <div class="brand"><span class="logo">VIOS</span><span class="logo2">GARAGE</span><span class="tagline">STREET RACING ONLINE</span></div>
-    <div id="garageBar"><b id="garageName">อู่</b><button id="btnExitGarage" class="on">ขับออกจากอู่ ▶</button></div>
+    <div id="garageBar"><b id="garageName">อู่</b><button id="btnMaxMoney" class="gonly" title="เพิ่มเงินเป็น 999,999,999">💰 +999,999,999</button><button id="btnExitGarage" class="on">ขับออกจากอู่ ▶</button></div>
+    <div id="driveBar" class="donly"><button id="btnOpenGarage" title="เข้าอู่แต่งรถ / เลือกรุ่นรถ (G)">🔧 อู่ &amp; รุ่นรถ</button><button id="btnQuickRace" title="เปิดแข่งรถทันที">🏁 แข่งรถ</button><button id="btnCarMeet" title="วาร์ปไปลานจอด Car Meet กับเพื่อน">✨ Car Meet</button></div>
     <div class="tools">
       <button id="btnRotate" class="gonly" title="หมุนรอบคันอัตโนมัติ">⟳ 360°</button>
       <div class="seg small gonly" id="camSeg">
@@ -63,6 +64,7 @@
     <div id="tabBody"></div>
   </aside>
 
+  <div id="speedFx" aria-hidden="true"></div>
   <div id="hud" hidden>
     <div id="gauge">
       <svg viewBox="0 0 200 200" aria-hidden="true">
@@ -77,8 +79,12 @@
     <div class="drivebtns">
       <button id="btnSound">🔇 เสียง</button>
       <button id="btnChase" class="on">🎥 กล้องตาม</button>
+      <button id="btnHorn" title="บีบแตร (H)">📢</button>
+      <button id="btnFlash" title="กะพริบไฟ (L)">💡</button>
       <button id="btnResetCar" title="กลับเข้าถนน (R)">↺ กลับถนน</button>
+      <button id="btnBackGarage" hidden>🔧 กลับอู่</button>
     </div>
+    <div id="dragHud" hidden></div>
   </div>
   <div id="cityHud" hidden>
     <div id="roadBadge">📍 กรุงเทพฯ</div>
@@ -115,7 +121,7 @@
   <div id="raceSetup" hidden><div class="gfx-card"><div class="gfx-head"><b>🏁 เปิดการแข่งขัน</b><button class="rs-x" aria-label="ปิด">✕</button></div><div class="rs-body"></div></div></div>
   <div id="fps" hidden></div>
 
-  <div id="worldMap" hidden><div class="wm-card"><div class="gfx-head"><b>🗺️ แผนที่เมือง</b><button class="wm-x" aria-label="ปิด">✕</button></div><canvas id="wmCanvas" width="1100" height="720"></canvas><p id="wmInfo"></p></div></div>
+  <div id="worldMap" hidden><div class="wm-card"><div class="gfx-head"><b>🗺️ แผนที่เมือง (คลิกจุดบนแผนที่เพื่อวาร์ป)</b><button class="wm-x" aria-label="ปิด">✕</button></div><canvas id="wmCanvas" width="1100" height="720"></canvas><div id="wmQuick" class="wm-quick"></div><p id="wmInfo"></p></div></div>
   <div id="profile" hidden><div class="gfx-card"><div class="gfx-head"><b>👤 นักซิ่ง</b><button class="wm-x" aria-label="ปิด">✕</button></div><div class="pf-body"></div></div></div>
 
   <div id="rotateHint">📱↻ หมุนจอเป็นแนวนอนเพื่อขับได้ถนัดขึ้น</div>

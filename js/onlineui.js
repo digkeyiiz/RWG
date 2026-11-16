@@ -2,7 +2,7 @@
 // the server puts everyone into a shared world automatically.
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function setupOnlineUI(online, { toast, challenge, inspect }) {
+export function setupOnlineUI(online, { toast, challenge, inspect, carMeet }) {
   const btn = document.getElementById('btnOnline');
   const box = document.getElementById('onlineBox');
   const body = box.querySelector('.ob-body');
@@ -22,14 +22,52 @@ export function setupOnlineUI(online, { toast, challenge, inspect }) {
     btn.classList.toggle('off', !online.inRoom);
     if (box.hidden) return;
     if (!online.inRoom) { body.innerHTML = '<p class="ob-note">กำลังเชื่อมต่อ…</p>'; return; }
-    const list = [...online.peers.values()];
+    const list = [...online.peers.values()].sort((a, b) => (b.likes || 0) - (a.likes || 0));
+    const myCrew = online.me?.crew ? `<span class="crew-tag">[${esc(online.me.crew)}]</span> ` : '';
+    const maxLikes = Math.max(online.me?.likes || 0, ...list.map((p) => p.likes || 0));
+    const myKing = maxLikes > 0 && (online.me?.likes || 0) === maxLikes ? '<span class="king-badge">👑 King</span>' : '';
     body.innerHTML = `
-      <div class="ob-l">เมือง ${esc(online.code)} · ${list.length + 1} คน · ผู้เล่นทั้งเซิร์ฟเวอร์ ${online.online ?? '-'} คน</div>
-      <ul class="ob-list"><li class="me">🚗 ${esc(online.name)} (คุณ)</li>${list.map((p) => `<li>🚗 ${esc(p.name)}${p.username ? ` <small>@${esc(p.username)}</small>` : ''} <span><button data-look="${p.id}">🔍 ดูรถ</button><button data-id="${p.id}">⚔️</button></span></li>`).join('')}</ul>
-      ${list.length ? '' : '<p class="ob-note">ยังไม่มีใครอื่นในเมืองตอนนี้ — ขับเก็บเงิน หาอู่ลับ หรือแข่งกับบอทไปก่อน เมื่อมีคนเข้ามาจะเห็นทันที</p>'}
-      <p class="ob-note">ขับเข้าไปใกล้ผู้เล่นอื่นแล้วกด <kbd>C</kbd> เพื่อท้าแข่งได้ด้วย</p>`;
+      <div class="ob-l">เมือง ${esc(online.code)} · ${list.length + 1} คน · ทั้งเซิร์ฟเวอร์ ${online.online ?? '-'} คน</div>
+      <div class="ob-meet-bar">
+        <button id="obMeetBtn" class="on">🚗 วาร์ปไป Car Meet</button>
+        <div class="ob-crew-in"><input id="obCrewIn" maxlength="6" placeholder="แท็กคลับ (เช่น BKK)" value="${esc(online.me?.crew || '')}"><button id="obCrewBtn">ตั้ง</button></div>
+      </div>
+      <div class="ob-emotes" title="ส่งอีโมจิทักทายด่วน">
+        <button data-emote="🔥 แต่งสวยมาก!">🔥</button>
+        <button data-emote="👑 รถเทพจัด!">👑</button>
+        <button data-emote="💨 ซิ่งไหม?">💨</button>
+        <button data-emote="❤️ ถูกใจคันนี้">❤️</button>
+        <button data-emote="⚡ รวมตัว Car Meet!">⚡</button>
+      </div>
+      <ul class="ob-list"><li class="me">🚗 ${myCrew}${esc(online.name)} (คุณ)${myKing} <small>👍 ${online.me?.likes || 0}</small></li>${list.map((p) => {
+        const king = maxLikes > 0 && (p.likes || 0) === maxLikes ? '<span class="king-badge">👑 King</span>' : '';
+        return `<li>🚗 ${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}${p.username ? ` <small>@${esc(p.username)}</small>` : ''} <span><button data-look="${p.id}" title="ส่องรถ 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
+      }).join('')}</ul>
+      ${list.length ? '' : '<p class="ob-note">ยังไม่มีใครอื่นในเมืองตอนนี้ — ชวนเพื่อนมาจอดโชว์รถที่ Car Meet หรือขับเล่นรอได้เลย</p>'}
+      <p class="ob-note">คีย์ลัดออนไลน์: <kbd>H</kbd> บีบแตร · <kbd>L</kbd> กะพริบไฟ · <kbd>C</kbd> ท้าแข่งคนใกล้ตัว</p>`;
+    body.querySelector('#obMeetBtn').onclick = () => { open(false); carMeet?.(); };
+    body.querySelectorAll('.ob-emotes button').forEach((b) => {
+      b.onclick = () => { online.chat(b.dataset.emote); toast('💬 ส่งทักทายแล้ว'); };
+    });
+    const saveCrew = async () => {
+      const val = body.querySelector('#obCrewIn').value.trim();
+      const r = await online.setCrew(val);
+      toast(r?.ok ? (r.crew ? `ตั้งแท็กคลับ [${r.crew}] แล้ว` : 'ลบแท็กคลับแล้ว') : (r?.err || 'ตั้งไม่ได้'));
+      render();
+    };
+    body.querySelector('#obCrewBtn').onclick = saveCrew;
+    body.querySelector('#obCrewIn').onkeydown = (e) => { e.stopPropagation(); if (e.key === 'Enter') saveCrew(); };
     body.querySelectorAll('button[data-look]').forEach((b) => {
       b.onclick = () => { const p = online.peers.get(b.dataset.look); if (p) { open(false); inspect(p); } };
+    });
+    body.querySelectorAll('button[data-like]').forEach((b) => {
+      b.onclick = async () => {
+        const p = online.peers.get(b.dataset.like);
+        if (!p) return;
+        const r = await online.like(p.id);
+        if (r?.ok) { p.likes = r.likes; toast(`👍 โหวตรถ ${p.name} แล้ว!`); render(); }
+        else toast(r?.err || 'โหวตไม่สำเร็จ');
+      };
     });
     body.querySelectorAll('button[data-id]').forEach((b) => {
       b.onclick = () => { const p = online.peers.get(b.dataset.id); if (p) { open(false); challenge({ id: p.id, name: p.name }); } };

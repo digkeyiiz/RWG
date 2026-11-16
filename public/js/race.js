@@ -128,7 +128,7 @@ class Tracker {
     let lapDone = false;
     if (this.cp % t.cps === 0) { // heading for the finish line
       if (rel < n * 0.25 && this.prevRel > n * 0.75) { this.lap++; this.cp = 1; lapDone = true; }
-    } else if (rel >= relCp && rel - relCp < n * 0.2) this.cp++;
+    } else if (rel >= relCp - 2 && rel - relCp < n * 0.25) this.cp++;
     this.prevRel = rel;
     void s;
     return lapDone;
@@ -247,9 +247,10 @@ export class Race {
   ui() {
     const $ = (id) => document.getElementById(id);
     this.el = { setup: $('raceSetup'), hud: $('raceHud'), count: $('raceCount'), res: $('raceResult'), msg: $('raceMsg') };
-    this.opt = { track: 'touge', laps: 1, bots: 5, diff: 1, traffic: false };
+    this.opt = { track: 'touge', laps: 1, bots: 5, diff: 0, traffic: false };
     try { Object.assign(this.opt, JSON.parse(localStorage.getItem('viosGarage.raceOpt.v1') || '{}')); } catch { /* ignore */ }
     this.el.setup.querySelector('.rs-x').onclick = () => { this.el.setup.hidden = true; };
+    this.el.msg.onclick = () => { if (this.active) this.respawn(); };
   }
   // opened at a race marker in the world (trackId) or from a challenge (target player)
   openSetup(trackId = null, target = null, party = false) {
@@ -271,7 +272,7 @@ export class Race {
       <label>บอทร่วมแข่ง</label>${seg('bots', [[0, 'ไม่มี'], [2, '2'], [3, '3'], [5, '5']])}
       <label>ความยากบอท</label>${seg('diff', [[0, 'ง่าย'], [1, 'ปกติ'], [2, 'ยาก'], [3, 'โหด']])}
       <div class="rs-prize">🏆 เงินรางวัลที่ 1: <b>฿${(E ? E.racePrize(o.track, o.laps, 0, 2, o.bots) : 0).toLocaleString()}</b> (แข่งกับคนจริง 2 คน) · กับบอท <b>฿${(E ? E.racePrize(o.track, o.laps, 0, 1, o.bots) : 0).toLocaleString()}</b>${best ? ` · สถิติคุณ ${fmt(best)}` : ''}</div>
-      <div class="rr-btns"><button class="rs-go on" data-now="0">📣 เปิดรับคู่แข่ง 20 วิ</button><button class="rs-go" data-now="1">🏁 เริ่มทันที</button></div>
+      <div class="rr-btns"><button class="rs-go on" data-now="1">🏁 เริ่มทันที</button><button class="rs-go" data-now="0">📣 เปิดรับคู่แข่ง 20 วิ</button></div>
       <p class="ob-note">ผู้เล่นทุกคนในเมืองจะเห็นคำเชิญและกดเข้าร่วมได้ · เงินรางวัลตรวจสอบโดยเซิร์ฟเวอร์</p>`;
     box.querySelectorAll('.rs-tracks button').forEach((b) => { b.onclick = () => { o.track = b.dataset.track; this.saveOpt(); this.openSetup(null, target, party); }; });
     box.querySelectorAll('.gfx-seg').forEach((sg) => sg.querySelectorAll('button').forEach((b) => {
@@ -285,7 +286,7 @@ export class Race {
   // ---------------- start: the server runs the lobby and sends race:start to the racers
   async requestStart(now = false) {
     const o = this.opt;
-    const r = await this.online.raceOpen({ track: o.track, laps: o.laps, bots: o.bots, now, to: this.target?.id || null, party: !!this.partyMode });
+    const r = await this.online.raceOpen({ track: o.track, laps: o.laps, bots: o.bots, diff: o.diff, now, to: this.target?.id || null, party: !!this.partyMode });
     if (!r?.ok) this.toast(r?.err || 'เปิดแข่งไม่ได้');
     else if (!now) this.toast('📣 เปิดรับคู่แข่งแล้ว — เริ่มใน 20 วินาที');
   }
@@ -321,7 +322,7 @@ export class Race {
       if (real) await loadBotModels(BOT_GENS.length, this.getBuild().gen);
       const protos = real ? botReady() : [];
       const myPI = computePerf(this.getBuild()).rating.pi;
-      const targetPI = myPI * [0.8, 0.95, 1.05, 1.18][cfg.diff ?? 1];
+      const targetPI = myPI * [0.72, 0.85, 0.98, 1.12][cfg.diff ?? 0];
       for (let k = 0; k < nb; k++) {
         const slot = grid.length + k;
         const proto = protos.length ? protos[Math.floor(rand() * protos.length)] : null;
@@ -338,7 +339,7 @@ export class Race {
         body.add(tag(name));
         this.group.add(body);
         const bot = new Bot(track, slot, botPerf(gen, targetPI, rand), name, body);
-        bot.skill = [0.82, 0.9, 0.96, 1.0][cfg.diff ?? 1] * (0.96 + rand() * 0.06);
+        bot.skill = [0.70, 0.82, 0.92, 0.99][cfg.diff ?? 0] * (0.96 + rand() * 0.05);
         this.bots.push(bot);
       }
       this.showMsg('');
@@ -368,11 +369,12 @@ export class Race {
     this.cfg = null;
   }
 
-  // start/finish gantry + checkpoint arches (only the next one glows)
+  // start/finish gantry + checkpoint arches (only the next one glows + tall beacon)
   buildGates() {
     const t = this.track, P = t.pts;
     const pole = new THREE.CylinderGeometry(0.16, 0.16, 6, 8).translate(0, 3, 0);
     const poleM = new THREE.MeshStandardMaterial({ color: '#d9dde2', metalness: 0.6, roughness: 0.4 });
+    const beamGeo = new THREE.CylinderGeometry(1.4, 2.2, 42, 16, 1, true).translate(0, 21, 0);
     t.cpIdx.forEach((i, k) => {
       const p = P[i], g = new THREE.Group();
       const w = t.half + 1.2;
@@ -380,12 +382,14 @@ export class Race {
       const finish = k === 0;
       const bar = new THREE.Mesh(new THREE.BoxGeometry(0.5, finish ? 1.2 : 0.6, w * 2 + 0.4),
         finish ? new THREE.MeshStandardMaterial({ map: checkerTex(), emissive: '#ffffff', emissiveIntensity: 0.25, emissiveMap: checkerTex() })
-          : new THREE.MeshStandardMaterial({ color: '#ffb02e', emissive: '#ff8a00', emissiveIntensity: 0.6 }));
+          : new THREE.MeshStandardMaterial({ color: '#36ff8a', emissive: '#22c55e', emissiveIntensity: 0.8 }));
       bar.position.y = finish ? 5.6 : 5.7;
-      g.add(bar);
+      const beacon = new THREE.Mesh(beamGeo, new THREE.MeshBasicMaterial({ color: finish ? '#ffb02e' : '#36ff8a', transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      beacon.visible = false;
+      g.add(bar, beacon);
       g.position.set(p.x, p.y, p.z);
       g.rotation.y = Math.atan2(-p.tz, p.tx);
-      g.userData = { k, bar };
+      g.userData = { k, bar, beacon };
       this.group.add(g); this.gates.push(g);
     });
   }
@@ -426,7 +430,7 @@ export class Race {
       const fwd = Math.cos(this.driver.heading) * p.tx - Math.sin(this.driver.heading) * p.tz;
       const spd = this.driver.vel.length();
       tr.wrong = fwd < -0.4 && spd > 4 ? tr.wrong + dt : 0;
-      this.showMsg(tr.wrong > 1.2 ? '⛔ ผิดทาง! กลับรถ' : tr.offDist > this.track.half + 18 ? '↩ ออกนอกเส้นทาง กด "↺" เพื่อกลับเข้าสนาม' : '');
+      this.showMsg(tr.wrong > 1.2 ? '⛔ ผิดทาง! กลับรถ (คลิกเพื่อกลับเข้าสนาม)' : tr.offDist > this.track.half + 18 ? '↩ ออกนอกเส้นทาง — แตะที่นี่หรือกด R เพื่อกลับเข้าสนาม' : '');
     }
     // bots
     const me = { raced: this.myRaced(), l: -(this.tracker.lat ?? 0), v: this.driver.vel.length() };
@@ -437,15 +441,20 @@ export class Race {
       const lapLen = this.track.pts.len;
       if (b.finished === null && b.raced >= this.laps * lapLen && b.started) b.finished = T;
     }
-    // next checkpoint glow
+    // next checkpoint glow + tall beacon
     const nextK = this.tracker.cp % this.track.cps;
-    for (const g of this.gates) { g.visible = true; if (g.userData.k) g.userData.bar.material.emissiveIntensity = g.userData.k === nextK ? 1.6 + Math.sin(now * 6) * 0.6 : 0.15; }
+    for (const g of this.gates) {
+      const isNext = g.userData.k === nextK;
+      g.visible = true;
+      if (g.userData.beacon) g.userData.beacon.visible = isNext;
+      if (g.userData.k) g.userData.bar.material.emissiveIntensity = isNext ? 1.8 + Math.sin(now * 6) * 0.6 : 0.12;
+    }
     // online: send my progress
     if (this.state !== 'countdown') {
       this.sendT -= dt;
       if (this.sendT <= 0) { this.sendT = 0.4; this.online.raceProgress({ d: Math.round(this.myRaced() * 10) / 10, f: this.finishT ?? 0 }); }
     }
-    this.renderHud(T);
+    this.renderHud(T, carPos);
     // everyone (incl. bots, online friends) finished or time is up → results
     if (this.state === 'finished' && !this.el.res.dataset.final) {
       const all = this.standings(T);
@@ -475,16 +484,29 @@ export class Race {
     void T;
     return rows;
   }
-  renderHud(T) {
+  renderHud(T, carPos) {
     const rows = this.standings(T);
     const pos = rows.findIndex((r) => r.me) + 1;
     const lap = Math.max(1, Math.min(this.laps, (this.tracker.lap ?? 0) + 1));
-    const cur = this.lapStart != null ? T - this.lapStart : 0;
     const h = this.el.hud;
-    if (!h.firstChild) h.innerHTML = '<div class="rh-main"><div class="rh-pos"></div><div class="rh-lap"></div><div class="rh-time"></div></div><ol class="rh-list"></ol>';
+    if (!h.firstChild) h.innerHTML = '<div class="rh-main"><div class="rh-pos"></div><div class="rh-lap"></div><div class="rh-time"></div></div><div class="rh-next"></div><ol class="rh-list"></ol>';
     h.querySelector('.rh-pos').innerHTML = rows.length > 1 ? `<b>${pos}</b><small>/${rows.length}</small>` : '<b>⏱</b>';
     h.querySelector('.rh-lap').innerHTML = `รอบ <b>${lap}/${this.laps}</b>`;
     h.querySelector('.rh-time').innerHTML = `${fmt(this.finishT ?? T)}<small>${this.lapTimes.length ? 'ดีสุด ' + fmt(Math.min(...this.lapTimes)) : 'สถิติ ' + fmt(this.best[this.track.id])}</small>`;
+    const nx = this.nextGate();
+    const nxEl = h.querySelector('.rh-next');
+    if (nx && carPos && this.finishT == null) {
+      const dx = nx.x - carPos.x, dz = nx.z - carPos.z;
+      const dist = Math.round(Math.hypot(dx, dz));
+      const ang = Math.atan2(-dz, dx) - this.driver.heading;
+      const deg = ((ang * 180 / Math.PI) % 360 + 360) % 360;
+      const arrows = ['⬆', '↖', '⬅', '↙', '⬇', '↘', '➡', '↗'];
+      const arr = arrows[Math.round(deg / 45) % 8];
+      nxEl.innerHTML = `<b>${arr}</b> จุดเช็คพอยท์ถัดไป ${dist} ม.`;
+      nxEl.hidden = false;
+    } else if (nxEl) {
+      nxEl.hidden = true;
+    }
     const list = h.querySelector('.rh-list');
     const html = rows.slice(0, 8).map((r, i) => `<li class="${r.me ? 'me' : ''}">${i + 1}. ${esc(r.name)}${r.fin != null ? ' 🏁' : ''}</li>`).join('');
     if (list.innerHTML !== html) list.innerHTML = html;
