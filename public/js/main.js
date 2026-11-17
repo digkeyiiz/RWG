@@ -84,7 +84,7 @@ panel.onTestDrive = async () => {
   document.body.classList.remove('garage');
   await setMode('drive');
   resetDragTest();
-  toast('🧪 สนามทดสอบ: เหยียบคันเร่งเพื่อจับเวลา 0-100 และ 402 ม.');
+  toast('🏁 สนามดราก: เลือกระยะทาง แล้วเหยียบคันเร่งเพื่อเริ่มจับเวลา');
 };
 // switching cars: park the current one in the garage, take the other one out exactly as it was left
 panel.onSwitchCar = async (genId) => {
@@ -207,7 +207,7 @@ const localOwned = (() => {
   catch { return new Set(); }
 })();
 const localStats = (() => {
-  const def = { rep: 0, races: 0, wins: 0, stuntBest: 0, stuntTotal: 0, best: {}, drag100: null, drag402: null };
+  const def = { rep: 0, races: 0, wins: 0, stuntBest: 0, stuntTotal: 0, best: {}, drag100: null, drag402: null, dragBest: {} };
   try {
     const raw = JSON.parse(localStorage.getItem(LOCAL_STATS_KEY) || '{}');
     return { ...def, ...raw, best: { ...(raw.best || {}) } };
@@ -555,6 +555,7 @@ async function setMode(m, spawn = null) {
   }
   mode = m;
   document.querySelectorAll('#modeSeg button').forEach((b) => b.classList.toggle('on', b.dataset.mode === m));
+  document.querySelectorAll('#worldSeg button').forEach((b) => b.classList.toggle('on', b.dataset.w === (m === 'drive' ? 'drag' : cityMap)));
   world.setMode(m);
   const driving = m === 'drive' || m === 'city';
   document.body.classList.toggle('driving', driving);
@@ -564,6 +565,7 @@ async function setMode(m, spawn = null) {
   cityHud.hidden = m !== 'city';
   document.getElementById('btnBackGarage').hidden = m !== 'drive';
   document.getElementById('dragHud').hidden = m !== 'drive';
+  document.getElementById('dragDist').hidden = m !== 'drive';
   if (m !== 'city' && race.active) race.abort('ออกจากการแข่งขัน');
   if (C) { C.sky.group.visible = m === 'city'; C.weather.lines.visible = m === 'city' && gfx.get('weather') === 'rain'; }
   syncTraffic();
@@ -578,7 +580,12 @@ async function setMode(m, spawn = null) {
       else if (rm) jumpRealSpot(0);
       else spawnAt(garageSpawn(GARAGES[0]));
     }
-    else { driver.reset(); driver.resetCones(); camera.position.set(-7, 2.4, 0); controls.target.set(0, 0.8, 0); }
+    else {
+      driver.limit = 1600;
+      spawnRaw(DRAG_SPAWN);
+      driver.resetCones();
+      world.setFinish?.(dragState.target);
+    }
   } else {
     driver.setEnv(null);
     car.root.position.set(0, 0, 0); car.root.rotation.set(0, 0, 0);
@@ -654,7 +661,14 @@ async function switchCityMap(w) {
     else jumpRealSpot(0);
   }
 }
-document.querySelectorAll('#worldSeg button').forEach((b) => { b.onclick = () => switchCityMap(b.dataset.w); });
+document.querySelectorAll('#worldSeg button').forEach((b) => { b.onclick = () => { if (b.dataset.w === 'drag') enterDragStrip(); else switchCityMap(b.dataset.w); }; });
+async function enterDragStrip() {
+  if (race.active) race.abort('ไปสนามดราก');
+  document.body.classList.remove('garage');
+  await setMode('drive');
+  resetDragTest();
+  toast('🏁 สนามดราก: เลือกระยะทาง แล้วเหยียบคันเร่งเพื่อเริ่มจับเวลา');
+}
 realJumpEl.onchange = () => jumpRealSpot(+realJumpEl.value);
 
 document.getElementById('btnSafehouse').onclick = () => {
@@ -735,16 +749,25 @@ document.getElementById('btnBackGarage').onclick = () => {
   enterGarage(inGarage || { id: 'showroom', name: 'อู่กลาง & โชว์รูม' });
 };
 const dragHud = document.getElementById('dragHud');
+const dragDistEl = document.getElementById('dragDist');
+const DRAG_SPAWN = { x: -30, y: 0, z: 0, heading: 0 };
 const dragState = {
-  active: false, t0: 0, t100: null, t402: null, dist: 0,
-  best100: localStats.drag100, best402: localStats.drag402,
+  active: false, t0: 0, t100: null, tTarget: null, dist: 0, target: 402,
+  best100: localStats.drag100,
+};
+const dragBest = (d = dragState.target) => localStats.dragBest?.['d' + d] ?? (d === 402 ? localStats.drag402 : null);
+dragDistEl.onchange = () => {
+  dragState.target = +dragDistEl.value;
+  world.setFinish?.(dragState.target);
+  resetDragTest();
 };
 function resetDragTest() {
-  dragState.active = false; dragState.t0 = 0; dragState.t100 = null; dragState.t402 = null; dragState.dist = 0;
-  if (dragHud) dragHud.innerHTML = `<span>0-100: <b>--</b></span><span>402m: <b>--</b></span>${dragState.best402 ? `<span>ดีสุด: <b>${dragState.best402.toFixed(2)}s</b></span>` : ''}`;
+  dragState.active = false; dragState.t0 = 0; dragState.t100 = null; dragState.tTarget = null; dragState.dist = 0;
+  const best = dragBest();
+  if (dragHud) dragHud.innerHTML = `<span>0-100: <b>--</b></span><span>${dragState.target}m: <b>--</b></span>${best ? `<span>ดีสุด: <b>${best.toFixed(2)}s</b></span>` : ''}`;
 }
 function updateDragTest(dt, kmh, spd) {
-  if (!dragState.active && spd > 0.8) { dragState.active = true; dragState.t0 = performance.now() / 1000; dragState.t100 = null; dragState.t402 = null; dragState.dist = 0; }
+  if (!dragState.active && spd > 0.8) { dragState.active = true; dragState.t0 = performance.now() / 1000; dragState.t100 = null; dragState.tTarget = null; dragState.dist = 0; }
   if (!dragState.active) return;
   if (spd < 0.3 && dragState.dist > 5) { resetDragTest(); return; }
   dragState.dist += spd * dt;
@@ -760,18 +783,22 @@ function updateDragTest(dt, kmh, spd) {
     }
     toast(`⚡ 0-100 กม./ชม.: ${el.toFixed(2)} วินาที!${pr ? ' (สถิติใหม่!)' : ''}`);
   }
-  if (dragState.t402 === null && dragState.dist >= 402) {
-    dragState.t402 = el;
-    const pr = !(dragState.best402 <= el);
+  if (dragState.tTarget === null && dragState.dist >= dragState.target) {
+    dragState.tTarget = el;
+    const t = Math.round(el * 100) / 100;
+    const prev = dragBest();
+    const pr = !(prev <= t);
     if (pr) {
-      dragState.best402 = Math.round(el * 100) / 100;
-      localStats.drag402 = Math.min(localStats.drag402 ?? 999, dragState.best402);
+      (localStats.dragBest ||= {})['d' + dragState.target] = t;
+      if (dragState.target === 402) {
+        localStats.drag402 = Math.min(localStats.drag402 ?? 999, t);
+        online?.saveDrag(null, localStats.drag402).then((r) => { if (r?.updated) game.updateWallet(); });
+      }
       saveLocalStats();
-      online?.saveDrag(null, dragState.best402).then((r) => { if (r?.updated) game.updateWallet(); });
     }
-    toast(`🏁 402 เมตร: ${el.toFixed(2)} วินาที!${pr ? ' (สถิติใหม่!)' : ''}`);
+    toast(`🏁 ${dragState.target} เมตร: ${el.toFixed(2)} วินาที · ท้าย ${Math.round(kmh)} กม./ชม.${pr ? ' (สถิติใหม่!)' : ''}`);
   }
-  if (dragHud) dragHud.innerHTML = `<span>0-100: <b>${dragState.t100 != null ? dragState.t100.toFixed(2) + 's' : (kmh >= 1 ? el.toFixed(1) + 's' : '--')}</b></span><span>402m (${Math.min(402, Math.round(dragState.dist))}m): <b>${dragState.t402 != null ? dragState.t402.toFixed(2) + 's' : el.toFixed(1) + 's'}</b></span>`;
+  if (dragHud) dragHud.innerHTML = `<span>0-100: <b>${dragState.t100 != null ? dragState.t100.toFixed(2) + 's' : (kmh >= 1 ? el.toFixed(1) + 's' : '--')}</b></span><span>${dragState.target}m (${Math.min(dragState.target, Math.round(dragState.dist))}m): <b>${dragState.tTarget != null ? dragState.tTarget.toFixed(2) + 's' : el.toFixed(1) + 's'}</b></span>`;
 }
 addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT') return;
@@ -797,7 +824,7 @@ btnChase.onclick = () => { chase = !chase; btnChase.classList.toggle('on', chase
 // R: back onto the road (race: at your progress · touge: nearest road point · city: upright where you are)
 document.getElementById('btnResetCar').onclick = () => {
   if (race.respawn()) return;
-  if (mode !== 'city') { driver.reset(); resetDragTest(); return; }
+  if (mode !== 'city') { driver.reset(DRAG_SPAWN); resetDragTest(); return; }
   const p = driver.pos;
   const rm = activeRealMap();
   if (rm) {

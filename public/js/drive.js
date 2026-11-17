@@ -9,6 +9,7 @@ export class Driver {
     this.keys = {};
     this.touch = { gas: 0, brake: 0, left: 0, right: 0, hand: 0, nos: 0, steer: 0 };
     this.wear = 0; // engine condition 0..1 — persists across respawns until repaired in the garage
+    this.limit = 145; // free-drive play-area radius (no env)
     this.reset();
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -293,7 +294,7 @@ export class Driver {
       this.vel.addScaledVector(f2, g);
       this.impact *= Math.exp(-4 * dt);
     } else {
-      const lim = 145;
+      const lim = this.limit || 145;
       if (this.pos.length() > lim) { this.pos.setLength(lim); this.vel.multiplyScalar(-0.3); }
     }
     // body motion: spring-damper driven by shock settings
