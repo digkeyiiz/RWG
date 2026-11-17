@@ -3,6 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { attachRooms } = require('./rooms');
+const { handleAdmin } = require('./admin');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT) || 3000;
@@ -29,6 +30,17 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, ...rooms.stats() }));
+    return;
+  }
+  if (u.pathname.startsWith('/admin/api/')) {
+    handleAdmin(req, res, u, rooms).then((handled) => {
+      if (!handled) { res.writeHead(404); res.end('Not Found'); }
+    }).catch(() => { res.writeHead(500); res.end('Server Error'); });
+    return;
+  }
+  if (u.pathname === '/admin' || u.pathname === '/admin/') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    fs.createReadStream(path.join(PUBLIC_DIR, 'admin.html')).pipe(res);
     return;
   }
 

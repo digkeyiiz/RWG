@@ -70,6 +70,23 @@ class Store {
     return this.profiles.get(key) || null;
   }
 
+  // Top every profile's wallet up to `amount` (covers accounts created before the money grant,
+  // including ones that have not logged in since). Returns the number of profiles topped up.
+  grantAll(amount, kind = 'grant') {
+    if (!Number.isFinite(amount) || amount <= 0) return 0;
+    let n = 0;
+    for (const [key, p] of this.profiles) {
+      const cur = Number.isFinite(p.money) ? p.money : 0;
+      if (cur < amount) {
+        p.money = amount;
+        this.tx(key, kind, amount - cur, { to: amount });
+        n++;
+      }
+    }
+    if (n) this.touch();
+    return n;
+  }
+
   get(token) {
     if (typeof token !== 'string' || !token) return null;
     const key = this.tokens.get(token);

@@ -8,6 +8,7 @@ export const START_MONEY = 999999999;
 export const CAR_PRICES = {
   gen2: 0, 'civic-eg': 60000, 'civic-fd': 95000, 'civic-fc': 130000, 'civic-fe': 165000, 'nissan-silvia-s13': 190000, 'evo-ix': 320000,
   ae86: 180000, 'supra-a80': 450000, 'skyline-r34': 520000, 'rx7-fd': 420000, 'jazz-gk': 75000, dmax: 240000,
+  'tesla-m3': 1, 'crv-2026': 1,
 };
 
 // engine swaps: power, forced induction and rarity
@@ -27,7 +28,7 @@ export const carKey = (gen) => `car:${gen}`;
 export const engKey = (gen, id) => `${gen}|eng:${id}`;
 export const partKey = (gen, k, id) => `${gen}|part:${k}:${id}`;
 
-export function priceOf(key) {
+function rawPrice(key) {
   let m = /^car:([\w-]+)$/.exec(key);
   if (m) return CAR_PRICES[m[1]] ?? null;
   m = /^([\w-]+)\|eng:([\w-]+)$/.exec(key);
@@ -36,6 +37,9 @@ export function priceOf(key) {
   if (m) return CAR_PRICES[m[1]] === undefined ? null : partPrice(m[2], m[3]);
   return null;
 }
+// every purchasable item costs ฿1 — price is for flavor, not progression;
+// 0 stays free (auto-owned), null stays unlisted
+export function priceOf(key) { const p = rawPrice(key); return p > 0 ? 1 : p; }
 // free items never need to be bought (stock parts, starter car)
 export const isFree = (key) => priceOf(key) === 0;
 

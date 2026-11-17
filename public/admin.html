@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIOS GARAGE — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0d1117;--card:#161b22;--line:#2d333b;--fg:#e6edf3;--mut:#8b949e;--acc:#f9b32f;--ok:#3fb950;--bad:#f85149;--info:#58a6ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:Kanit,system-ui,sans-serif;font-size:14px}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:18px;margin:0;font-weight:600}
+header h1 b{color:var(--acc)}
+.tabs{margin-left:auto;display:flex;gap:6px}
+.tabs button{background:#21262d;border:1px solid var(--line);color:var(--fg);padding:7px 16px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:14px}
+.tabs button.on{background:var(--acc);color:#111;border-color:var(--acc);font-weight:600}
+main{padding:18px 20px;max-width:1200px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.card h3{margin:0 0 10px;font-size:15px;color:var(--acc);font-weight:600}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--mut);font-weight:400;padding:5px 8px;border-bottom:1px solid var(--line)}
+td{padding:5px 8px;border-bottom:1px solid #21262d}
+tr:hover td{background:#1c2129}
+input,select,textarea{background:#0d1117;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:6px 9px;font-family:inherit;font-size:13px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--acc)}
+button.act{background:#21262d;border:1px solid var(--line);color:var(--fg);padding:5px 12px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px}
+button.act:hover{border-color:var(--acc)}
+button.act.pri{background:var(--acc);color:#111;border-color:var(--acc);font-weight:600}
+button.act.dan{color:var(--bad);border-color:#5a3535}
+button.act.ok{color:var(--ok)}
+.grid{display:grid;gap:10px}
+.stat{display:inline-block;background:#0d1117;border:1px solid var(--line);border-radius:8px;padding:10px 18px;margin:0 8px 8px 0;min-width:120px}
+.stat .v{font-size:22px;font-weight:600;color:var(--acc)}
+.stat .l{font-size:12px;color:var(--mut)}
+.mut{color:var(--mut);font-size:12px}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;background:#21262d;border:1px solid var(--line)}
+.tag.on{background:#12361c;color:var(--ok);border-color:#1d5c2e}
+.tag.off{background:#3d1a1a;color:var(--bad);border-color:#5a3535}
+.log{font-family:ui-monospace,Consolas,monospace;font-size:12px;line-height:1.6;max-height:480px;overflow:auto;white-space:pre-wrap}
+.log .t{color:var(--mut)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.row>div{display:flex;flex-direction:column;gap:3px}
+.row label{font-size:12px;color:var(--mut)}
+.hide{display:none}
+#msg{position:fixed;bottom:16px;right:16px;background:var(--card);border:1px solid var(--acc);border-radius:8px;padding:10px 16px;display:none;z-index:9}
+pre{white-space:pre-wrap;word-break:break-all;font-size:12px;margin:6px 0}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:4px 10px;font-size:13px}
+details{margin:6px 0}
+summary{cursor:pointer;color:var(--info)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🏁 <b>VIOS GARAGE</b> · หลังบ้าน</h1>
+  <div class="tabs" id="tabs" style="display:none">
+    <button data-t="dash" class="on">ภาพรวม</button>
+    <button data-t="logs">Logs</button>
+    <button data-t="set">ตั้งค่าเกม</button>
+    <button data-t="cars">🚗 จัดการรถ</button>
+  </div>
+</header>
+<main>
+<div id="login" class="card" style="max-width:420px;margin:60px auto">
+  <h3>เข้าสู่ระบบหลังบ้าน</h3>
+  <p class="mut">ใส่ ADMIN_KEY ของเซิร์ฟเวอร์ (ตั้งใน environment variable)</p>
+  <div class="row">
+    <div style="flex:1"><label>Admin key</label><input id="key" type="password" style="width:100%" placeholder="ADMIN_KEY"></div>
+    <button class="act pri" id="loginBtn">เข้าสู่ระบบ</button>
+  </div>
+</div>
+
+<div id="app" class="hide">
+<!-- ============ DASH ============ -->
+<section id="t-dash">
+  <div class="card"><h3>สถานะเซิร์ฟเวอร์</h3><div id="stats"></div></div>
+  <div class="card"><h3>ผู้เล่นออนไลน์ <span class="mut" id="pcount"></span> <button class="act" onclick="loadPlayers()" style="float:right">⟳ รีเฟรช</button></h3>
+    <table><thead><tr><th>ชื่อ</th><th>ผู้ใช้</th><th>รถ</th><th>เงิน</th><th>REP</th><th>W/R</th><th>ตำแหน่ง</th><th>สถานะ</th></tr></thead><tbody id="players"></tbody></table>
+  </div>
+  <div class="card"><h3>โปรไฟล์ทั้งหมด <span class="mut" id="ptotal"></span></h3>
+    <div class="row"><div><label>ค้นหา</label><input id="pq" placeholder="ชื่อ / username"></div><button class="act" onclick="loadProfiles()">ค้นหา</button></div>
+    <table><thead><tr><th>ชื่อ</th><th>ผู้ใช้</th><th>เงิน</th><th>REP</th><th>W/R</th><th>รถ</th><th>เล่นล่าสุด</th></tr></thead><tbody id="profiles"></tbody></table>
+  </div>
+</section>
+
+<!-- ============ LOGS ============ -->
+<section id="t-logs" class="hide">
+  <div class="card"><h3>Event log (session นี้) <button class="act" onclick="loadLogs()" style="float:right">⟳ รีเฟรช</button></h3>
+    <div class="row"><div><label>จำนวน</label><input id="logn" value="150" style="width:80px"></div>
+    <div><label>กรอง tx kind</label><select id="logkind"><option value="">ทั้งหมด</option><option>buy</option><option>claim</option><option>race</option><option>stunt</option><option>grant</option><option>race-reject</option></select></div></div>
+    <div class="log" id="events"></div></div>
+  <div class="card"><h3>Transaction log (ถาวร — tx.log)</h3><div class="log" id="txlog"></div></div>
+</section>
+
+<!-- ============ SETTINGS ============ -->
+<section id="t-set" class="hide">
+  <div class="card"><h3>ตั้งค่าระบบเกม (มีผลทันที ไม่ต้องรีสตาร์ท)</h3>
+    <div id="setForm" class="grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr))"></div>
+    <div style="margin-top:12px"><button class="act pri" onclick="saveSettings()">💾 บันทึก</button> <button class="act" onclick="resetSettings()">คืนค่าเริ่มต้น</button></div>
+  </div>
+</section>
+
+<!-- ============ CARS ============ -->
+<section id="t-cars" class="hide">
+  <div class="card"><h3>📤 อัปโหลด .glb (จาก Sketchfab)</h3>
+    <div class="row">
+      <div style="flex:2"><label>ไฟล์ .glb</label><input type="file" id="glbfile" accept=".glb"></div>
+      <div><label>ชื่อไฟล์บนเซิร์ฟเวอร์</label><input id="glbname" placeholder="my-car.glb"></div>
+      <button class="act pri" onclick="uploadGlb()">อัปโหลด + วิเคราะห์</button>
+    </div>
+    <div id="inspect"></div>
+  </div>
+  <div class="card"><h3>รถในเกม <button class="act" onclick="loadCars()" style="float:right">⟳ รีเฟรช</button></h3>
+    <table><thead><tr><th>id</th><th>ชื่อ</th><th>แหล่ง</th><th>GLB</th><th>สถานะ</th><th></th></tr></thead><tbody id="carlist"></tbody></table>
+  </div>
+  <div class="card"><h3 id="carFormTitle">➕ เพิ่มรถใหม่</h3>
+    <input type="hidden" id="cedit" value="">
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(210px,1fr))">
+      <div><label>id (a-z,0-9,-)</label><input id="cid" placeholder="supra-a90"></div>
+      <div><label>ชื่อแสดง</label><input id="cname" placeholder="Toyota Supra A90"></div>
+      <div><label>ยี่ห้อ</label><input id="cmake" placeholder="Toyota"></div>
+      <div><label>รุ่น</label><input id="cmodel" placeholder="Supra"></div>
+      <div><label>ปี</label><input id="cyears" placeholder="2019–ปัจจุบัน"></div>
+      <div><label>รหัส</label><input id="ccode" placeholder="A90"></div>
+      <div><label>ไฟล์ .glb</label><select id="cglb"></select></div>
+      <div><label>spec (คัดลอกฟิสิกส์จาก)</label><select id="cspec"></select></div>
+      <div><label>ยาง (กว้าง/ซีรีส์/ขอบ)</label><div class="row"><input id="ctw" placeholder="245" style="width:56px"><input id="cta" placeholder="40" style="width:50px"><input id="ctr" placeholder="18" style="width:50px"></div></div>
+      <div><label>สี (hex คั่นลูกน้ำ)</label><input id="ccolors" placeholder="#f4f4f0,#c8212f" style="width:100%"></div>
+      <div><label>ขนาด L/W/H/WB (ม.)</label><div class="row"><input id="cdL" placeholder="4.4" style="width:56px"><input id="cdW" placeholder="1.8" style="width:56px"><input id="cdH" placeholder="1.4" style="width:56px"><input id="cdWB" placeholder="2.6" style="width:56px"></div></div>
+      <div><label>เครดิต</label><input id="ccredit" placeholder='ชื่อโมเดล — license'></div>
+      <div><label>ลิงก์เครดิต</label><input id="ccrediturl" placeholder="https://sketchfab.com/…"></div>
+    </div>
+    <details style="margin-top:10px"><summary>⚙️ glbConfig (JSON — rotY, scale, paint, wheels…)</summary>
+      <textarea id="cglbcfg" rows="7" style="width:100%;font-family:ui-monospace,monospace" placeholder='{"rotY":1.5708,"scale":1,"wheels":{"FR":"WHEEL_RF","FL":"WHEEL_LF","RR":"WHEEL_RR","RL":"WHEEL_LR"},"hide":["WHEEL_RF","WHEEL_LF","WHEEL_RR","WHEEL_LR"],"anchorWheels":true,"paint":["body_paint"],"windows":["glass"],"head":["headlight"],"tail":["taillight"],"interiorMats":["seat","dash"]}'></textarea>
+    </details>
+    <div style="margin-top:10px"><button class="act pri" onclick="saveCar()">💾 บันทึกรถ</button> <button class="act" onclick="clearCarForm()">ล้างฟอร์ม</button></div>
+  </div>
+</section>
+</div>
+</main>
+<div id="msg"></div>
+<script src="admin.js"></script>
+</body>
+</html>

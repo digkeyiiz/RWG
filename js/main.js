@@ -3,12 +3,12 @@ import { createWorld } from './world.js';
 import { Car } from './car.js';
 import { Panel, mergeBuild } from './ui.js';
 import { Driver } from './drive.js';
-import { DEFAULT_BUILD, GENERATIONS } from './catalog.js';
+import { DEFAULT_BUILD, GENERATIONS, loadExtraCars } from './catalog.js';
 import { loadTemplate } from './glbcar.js';
 import { Online } from './net.js';
 import { setupOnlineUI } from './onlineui.js';
 import { Garage } from './garage.js';
-import { computePerf, carShowcaseSummary } from './engine.js';
+import { computePerf, carShowcaseSummary, registerCarSpec } from './engine.js';
 import { GfxSettings, settingsPanel, FrameGovernor, SHADOW_SIZE, VIEW, TRAFFIC } from './settings.js';
 import { Race } from './race.js';
 import { GameWorld } from './game.js';
@@ -16,6 +16,9 @@ import { Social } from './social.js';
 import * as ECON from './economy.js';
 import { GARAGES } from './places.js';
 import { CarFX } from './fx.js';
+
+// merge cars added via the /admin backend (data/cars.json) before anything reads GENERATIONS
+try { for (const c of await loadExtraCars()) registerCarSpec(c.id, c.specFrom); } catch { }
 
 // a stock build of a car, with that car's factory tyre size
 function freshBuild(genId) {
@@ -361,6 +364,15 @@ const projectReal = (cfg, lat, lon) => [
 ];
 const isMobile = isTouch || Math.min(innerWidth, innerHeight) < 600;
 let hour = 18.5, timeAuto = true, trafficOn = true;
+let weatherSynced = null; // server's weather while in a room; null → local setting
+let wpTarget = null, wpBeacon = null; // convoy waypoint pin + its beacon pillar
+let prevNosOn = false, lastNosAt = 0;
+let spectateId = null, draftToastAt = 0;
+const _vB = new THREE.Vector3(), _spPos = new THREE.Vector3(), _spTgt = new THREE.Vector3();
+const chatBubs = new Map(); // peerId → { el, until }
+const bubWrap = document.createElement('div');
+Object.assign(bubWrap.style, { position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: '40' });
+document.body.appendChild(bubWrap);
 let raceTraffic = null; // race override: true/false, null = player's choice
 
 // ---------- graphics settings ----------
@@ -1004,6 +1016,7 @@ function updateSkillHud(dt, kmh, slide, impact, rm, cp) {
               game.popGain(`+${banked.toLocaleString()} STUNT · +฿${r.cash.toLocaleString()} · +${r.rep} REP`, banked >= 1500);
               game.sound(banked >= 1500 ? 'big' : 'cash');
               if (r.best || banked >= 1200) game.feed(`🏆 คอมโบ <b>${lbl}</b> ${banked.toLocaleString()} PTS (+฿${r.cash.toLocaleString()} · +${r.rep} REP)`, 'gold');
+              if (r.tandem) game.feed(`🤝 <b>TANDEM</b> กับ ${r.tandem}! รางวัล +25%`, 'gold');
             } else {
               game.popGain(`+${banked.toLocaleString()} STUNT`, banked >= 1500);
               game.sound(banked >= 1500 ? 'big' : 'cash');
@@ -1055,7 +1068,16 @@ function frame(now) {
   }
   let night = 0;
   if (mode === 'city' && C) {
-    if (timeAuto) { hour = (hour + dt / 60) % 24; if (timeSliderEl) timeSliderEl.value = hour; }
+    if (timeAuto) { hour = (hour + dt / 60) % 24; }
+    // in a room the world owns the clock & weather — ease toward the server hour so
+    // resyncs don't pop the sky, and follow the world's weather instead of local setting
+    const wt = online?.inRoom && online.worldT;
+    if (wt) {
+      const dh = ((wt.hour - hour + 36) % 24) - 12;
+      hour = (hour + dh * Math.min(1, dt * 1.5) + 24) % 24;
+      if (weatherSynced !== wt.weather) { weatherSynced = wt.weather; C.weather.setMode(wt.weather); }
+    } else if (weatherSynced !== null) { weatherSynced = null; C.weather.setMode(gfx.get('weather')); }
+    if (timeSliderEl) { timeSliderEl.value = hour; timeSliderEl.disabled = !!wt; timeSliderEl.title = wt ? 'เวลาตามเซิร์ฟเวอร์ (เมืองออนไลน์)' : ''; }
     night = C.sky.apply(hour, world, VIEW[gfx.get('view')].fog);
     C.weather.update(dt, car.root.position, driver.vel, C.city, C.sky, VIEW[gfx.get('view')].fog);
     C.sky.updateEnv(renderer, hour, C.weather.wet);
@@ -1075,10 +1097,48 @@ function frame(now) {
     if (Math.abs(camera.far - farWant) > 20) { camera.far = farWant; camera.updateProjectionMatrix(); }
     const hh = Math.floor(hour), mm = Math.floor((hour - hh) * 60);
     if (clockEl) clockEl.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    // convoy waypoint beacon — clears on arrival, after 10 min, or when a new pin lands
+    if (wpTarget) {
+      if (!wpBeacon) {
+        const cyl = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.8, 90, 20, 1, true),
+          new THREE.MeshBasicMaterial({ color: 0x4cc3ff, transparent: true, opacity: 0.15, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+        const ring = new THREE.Mesh(new THREE.RingGeometry(2.4, 3.6, 40),
+          new THREE.MeshBasicMaterial({ color: 0x4cc3ff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+        ring.rotation.x = -Math.PI / 2; ring.position.y = -44.6;
+        cyl.add(ring); wpBeacon = cyl; scene.add(cyl);
+      }
+      wpBeacon.visible = true;
+      wpBeacon.position.set(wpTarget.x, 45, wpTarget.z);
+      wpBeacon.rotation.y += dt * 0.9;
+      const dWp = Math.hypot(driver.pos.x - wpTarget.x, driver.pos.z - wpTarget.z);
+      if (dWp < 18 || performance.now() - wpTarget.t > 10 * 60000) {
+        if (dWp < 18) toast('📍 ถึงจุดนัดแล้ว!');
+        scene.remove(wpBeacon); wpBeacon = null; wpTarget = null;
+      }
+    } else if (wpBeacon) { scene.remove(wpBeacon); wpBeacon = null; }
   }
+  if (wpBeacon && mode !== 'city') wpBeacon.visible = false;
   if (mode === 'drive' || mode === 'city') {
     lastCarPos.copy(car.root.position);
+    // slipstream: sit in the wake of a peer just ahead at speed → real drag cut
+    driver.draft = 0;
+    if (mode === 'city' && online?.peers?.size && driver.vel.length() > 18) {
+      const f = Math.cos(driver.heading), r = -Math.sin(driver.heading);
+      for (const p of online.peers.values()) {
+        const q = p.pose;
+        if (!q) continue;
+        const dx = q.x - driver.pos.x, dz = q.z - driver.pos.z;
+        const ahead = dx * f + dz * r, side = -dx * r + dz * f;
+        if (ahead > 4 && ahead < 24 && Math.abs(side) < 4.5) driver.draft = Math.max(driver.draft, 1 - ahead / 24);
+      }
+      if (driver.draft > 0.3 && performance.now() - draftToastAt > 15000) {
+        draftToastAt = performance.now();
+        toast('💨 SLIPSTREAM — ลากลมตามเพื่อน!');
+      }
+    }
     const s = driver.step(dt);
+    if (s.nosOn && !prevNosOn && performance.now() - lastNosAt > 800) { lastNosAt = performance.now(); online?.carAct('nos'); }
+    prevNosOn = s.nosOn;
     car.setDriveLights(s.braking);
     const cp = car.root.position;
     _camDelta.copy(cp).sub(lastCarPos);
@@ -1148,7 +1208,10 @@ function frame(now) {
           g.beginPath(); g.moveTo(R, R - 10); g.lineTo(R + 7, R + 8); g.lineTo(R, R + 4); g.lineTo(R - 7, R + 8); g.closePath(); g.fill(); g.stroke();
         } else {
           const rr = race.route();
-          C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, game.icons());
+          const ics = game.icons();
+          if (wpTarget) ics.push({ x: wpTarget.x, z: wpTarget.z, kind: 'wp' });
+          const friendSet = online.me?.friends?.length ? new Set(online.me.friends) : null;
+          C.minimap.draw(cp.x, cp.z, driver.heading, trafficActive() ? C.traffic.cars : [], online.dots(friendSet, online.partyUsernames), rr ? { route: rr, bots: race.dots(), next: race.nextGate() } : null, ics);
         }
       }
     } else { sun.position.copy(cp).add(_sunOff); sun.castShadow = sun.userData.shadowOn; }
@@ -1191,8 +1254,34 @@ function frame(now) {
       if (!skillHudEl.hidden) { skillHudEl.hidden = true; skill.pts = 0; skill.failT = 0; }
     }
     carFx.update(dt, (mode === 'drive' || mode === 'city') ? car : null, driver, gfx.get('preset'));
-    online.update(dt, mode, night);
+    online.update(dt, mode, night, camera);
     controls.update(dt);
+    // spectate a friend — chase camera trails their interpolated pose; any drive input exits
+    if (spectateId && mode === 'city' && !race?.active) {
+      const p = online.peers.get(spectateId);
+      const q = p?.pose;
+      if (!q || !p.car?.root.visible) spectateId = null;
+      else {
+        const f = Math.cos(q.h), r = -Math.sin(q.h);
+        camera.position.lerp(_spPos.set(q.x - f * 8.5, q.y + 3.1, q.z - r * 8.5), Math.min(1, dt * 5));
+        controls.target.lerp(_spTgt.set(q.x, q.y + 1, q.z), Math.min(1, dt * 9));
+        camera.lookAt(controls.target);
+      }
+    } else if (spectateId) spectateId = null;
+    // floating chat bubbles: project each live bubble over its peer's car
+    if (chatBubs.size) {
+      const nowMs = performance.now();
+      for (const [pid, b] of chatBubs) {
+        const q = online?.peers.get(pid)?.pose;
+        if (nowMs > b.until + 60000) { b.el.remove(); chatBubs.delete(pid); continue; }
+        if (!q || nowMs > b.until || mode !== 'city') { b.el.style.display = 'none'; continue; }
+        _vB.set(q.x, q.y + 2.75, q.z).project(camera);
+        if (_vB.z > 1 || Math.abs(_vB.x) > 1.05 || Math.abs(_vB.y) > 1.05) { b.el.style.display = 'none'; continue; }
+        b.el.style.display = 'block';
+        b.el.style.left = `${(_vB.x * 0.5 + 0.5) * innerWidth}px`;
+        b.el.style.top = `${(-_vB.y * 0.5 + 0.5) * innerHeight}px`;
+      }
+    }
     if (mode === 'city' && C && gfx.get('bloom')) { C.bloom.strength = 0.12 + night * 0.38; C.bloom.threshold = 0.92; C.bloom.radius = 0.35; C.grade.setState({ time: performance.now() / 1000, night, wet: C.weather.wet, speed: driver.vel.length() / 80 }); C.composer.render(dt); }
     else renderer.render(scene, camera);
   }
@@ -1257,7 +1346,13 @@ function frame(now) {
       },
     },
   });
-  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet, warpTo: warpToPose });
+  const onlineUI = setupOnlineUI(online, { toast, challenge: (t) => race.openSetup(null, t), inspect: (p) => social.inspect(p), carMeet: goCarMeet, warpTo: warpToPose,
+    waypoint: () => online.sendWaypoint(driver.pos.x, driver.pos.z, social.party ? 'party' : 'room'),
+    watch: (p) => { if (mode !== 'city') { toast('เข้าเมืองก่อน แล้วค่อยดูเพื่อนขับ'); return; } spectateId = p.id; toast(`👁 กำลังดู ${p.name} — กด ESC หรือเริ่มขับเพื่อออก`); } });
+  // spectate exits on any drive input, escape, canvas click, or race start
+  const stopSpectate = () => { if (spectateId) { spectateId = null; toast('ออกจากโหมดดูเพื่อน'); } };
+  addEventListener('keydown', (e) => { if (spectateId && (e.code === 'Escape' || e.code.startsWith('Arrow') || e.code === 'Space' || e.code.startsWith('Key'))) stopSpectate(); });
+  renderer.domElement.addEventListener('pointerdown', () => stopSpectate());
   online.on((ev) => {
     if (ev?.carAct?.kind === 'horn' && mode === 'city') {
       const p = online.peers.get(ev.carAct.id)?.pose;
@@ -1293,6 +1388,42 @@ function frame(now) {
           }
         }
       }
+    } else if (ev?.carAct?.kind === 'nos' && mode === 'city') {
+      const peer = online.peers.get(ev.carAct.id);
+      const q = peer?.pose;
+      if (q && peer.car && Math.hypot(q.x - driver.pos.x, q.z - driver.pos.z) <= 140) {
+        const P = peer.car.P, cos = Math.cos(q.h), sin = Math.sin(q.h);
+        const rearX = -(P.L || 4.3) * 0.49;
+        for (let i = 0; i < 10; i++) {
+          carFx.emitSpark(
+            q.x + rearX * cos, q.y + 0.25, q.z - rearX * sin,
+            -cos * (6 + Math.random() * 7) + (Math.random() - 0.5) * 2,
+            0.4 + Math.random() * 1.6,
+            sin * (6 + Math.random() * 7) + (Math.random() - 0.5) * 2,
+            '#7cd8ff',
+          );
+        }
+      }
+    }
+    if (ev?.chat) {
+      const p = online.peers.get(ev.chat.id);
+      if (p?.pose && mode === 'city') {
+        let b = chatBubs.get(p.id);
+        if (!b) {
+          const el = document.createElement('div');
+          Object.assign(el.style, { position: 'fixed', transform: 'translate(-50%,-115%)', padding: '6px 11px', background: 'rgba(10,12,18,.86)', border: '1px solid rgba(76,195,255,.45)', borderRadius: '13px', font: '13px Kanit,sans-serif', color: '#fff', whiteSpace: 'nowrap', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', display: 'none', boxShadow: '0 4px 14px rgba(0,0,0,.35)' });
+          b = { el, until: 0 }; chatBubs.set(p.id, b); bubWrap.appendChild(el);
+        }
+        b.el.textContent = `💬 ${ev.chat.text}`;
+        b.until = performance.now() + 5000;
+      }
+    }
+    if (ev?.tandem) toast(`🤝 ${ev.tandem.by} เข้า TANDEM กับคุณ!`);
+    if (ev?.waypoint) {
+      wpTarget = { x: ev.waypoint.x, z: ev.waypoint.z, t: performance.now() };
+      const km = Math.hypot(ev.waypoint.x - driver.pos.x, ev.waypoint.z - driver.pos.z);
+      toast(`📍 ${ev.waypoint.by} ปักหมุดรวมตัว${ev.waypoint.scope === 'party' ? ' (ปาร์ตี้)' : ''} — ${km < 1000 ? Math.round(km) + ' ม.' : (km / 1000).toFixed(1) + ' กม.'}`);
+      game.sound?.('ping');
     }
   });
 
