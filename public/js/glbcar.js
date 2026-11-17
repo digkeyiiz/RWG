@@ -39,6 +39,7 @@ function prepare(model, cfg) {
   const root = new THREE.Group();
   root.add(model);
   model.rotation.y = cfg.rotY ?? 0;
+  if (cfg.scale) model.scale.setScalar(cfg.scale); // source files aren't always meters — e.g. 0.01 for cm exports
   root.updateMatrixWorld(true);
 
   const inSubtree = (o, names) => { for (let p = o; p; p = p.parent) if (names.includes(p.name)) return true; return false; };
@@ -143,7 +144,7 @@ function prepare(model, cfg) {
   // ---- collision mesh for surface queries ----
   const parts = [];
   model.traverse((o) => {
-    if (!o.isMesh || !o.visible || o.userData.role === 'wheel' || inSubtree(o, cfg.interior || [])) return;
+    if (!o.isMesh || !o.visible || o.userData.role === 'wheel' || inSubtree(o, cfg.interior || []) || (cfg.interiorMats || []).includes(o.material?.name)) return;
     const g = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry;
     const src = g.attributes.position, f = new Float32Array(src.count * 3), v = new THREE.Vector3();
     for (let i = 0; i < src.count; i++) { v.fromBufferAttribute(src, i).applyMatrix4(o.matrixWorld); f[i * 3] = v.x; f[i * 3 + 1] = v.y; f[i * 3 + 2] = v.z; }

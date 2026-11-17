@@ -1,4 +1,7 @@
-import { DEFAULT_ENGINE } from './engine.js';
+import { DEFAULT_ENGINE, DEFAULT_SETUP, TIRE_BRANDS, WHEEL_BRANDS, SHOCK_TYPES } from './engine.js';
+// Tyre/wheel/shock physics data lives in engine.js (single source of truth for the
+// driving model); re-exported here because the customization UI thinks of them as catalog.
+export { TIRE_BRANDS, WHEEL_BRANDS, SHOCK_TYPES };
 // Vios Garage — data catalog.
 // All dimensions are in meters and approximate (based on published spec sheets).
 // To use a realistic 3D model for a generation, put a .glb file in /models and
@@ -290,7 +293,20 @@ export const GENERATIONS = [
   },
   {
     id: 'jazz-gk', make: 'Honda', model: 'Jazz', name: 'Jazz GK (Fit RS)', years: '2014–2020', code: 'GK5',
-    featured: true, glb: null,
+    featured: true, glb: 'models/jazz-gk.glb',
+    glbConfig: {
+      rotY: Math.PI / 2, // model faces +Z → car space faces +X
+      scale: 101, // source file is ~1/100 scale
+      wheels: { FR: 'WHEEL_RF', FL: 'WHEEL_LF', RR: 'WHEEL_RR', RL: 'WHEEL_LR' },
+      hide: ['WHEEL_RF', 'WHEEL_LF', 'WHEEL_RR', 'WHEEL_LR'],
+      hideMats: ['HondaMI_Tyre_02', 'HondaMI_ChangeA_Brake1', 'HondaMI_ChangeA_Rim1'], // stock wheels merged per-axle — hide all, use anchors
+      anchorWheels: true,
+      paint: ['HondaMI_1089010001_151'], windows: ['HondaMI_Glass1'],
+      head: ['HondaMI_Light1', 'orange_glass'], tail: ['Red_glass'],
+      mirror: ['HondaMI_Mirror1'],
+      interiorMats: ['HondaMI_Cabin1', 'HondaMI_Cabin_Leather_A1', 'HondaMI_Cabin_Plastic_A1', 'HondaMI_Dashboard1', 'HondaMI_Engine1', 'HondaMI_Exhaust1', 'HondaMI_Grid_A1'],
+    },
+    credit: { text: '"2018 Honda Fit / Jazz" โดย Ddiaz Design — CC Attribution', url: 'https://sketchfab.com/3d-models/2018-honda-fit-jazz-2b1f535f185e4a6abf6b0a3222487704' },
     dims: { L: 3.995, W: 1.695, H: 1.525, WB: 2.53, fOH: 0.78, clear: 0.145 },
     body: { hoodY: 0.96, trunkY: 1.04, beltY: 0.98, beltRise: 0.05, noseDrop: 0.24, tailDrop: 0.04,
             rg: [0.05, 0.17], ws: [0.58, 0.77], roofRatio: 0.76 },
@@ -307,6 +323,59 @@ export const GENERATIONS = [
     tire: { width: 265, aspect: 60, rim: 18 },
     style: { head: 'slim', grille: 'barWide', lower: 'hexBig', tail: 'tallClear', fog: true, drl: true, sharkfin: true },
     colors: ['#f4f4f0', '#2b2e33', '#153a6e', '#a5121c', '#c7cacf', '#0d0e11', '#d95326'],
+  },
+  {
+    id: 'tesla-m3', make: 'Tesla', model: 'Model 3', name: 'Tesla Model 3 Long Range', years: '2017–2023', code: 'M3',
+    glb: 'models/tesla-model3.glb',
+    glbConfig: {
+      rotY: -Math.PI / 2, // model faces -Z → car space faces +X
+      scale: 0.009, // source file is centimeters, slightly oversized → real L 4.69m
+      wheels: { FR: 'WHEEL_RF', FL: 'WHEEL_LF', RR: 'WHEEL_RR', RL: 'WHEEL_LR' },
+      hide: ['WHEEL_RF', 'WHEEL_LF', 'WHEEL_RR', 'WHEEL_LR', 'wheels', 'wheels.001'],
+      anchorWheels: true,
+      recolor: { 'Plastic.0': '#16181b', 'front_black.0': '#16181b', 'black_lights.0': '#14161a' },
+      paint: ['primary', 'primary.001', 'primary.002', 'primary.004'],
+      windows: ['glass.0', 'glass.1'],
+      head: ['right_front_light', 'left_front_light', 'light_night', 'aluminium_light.0'],
+      tail: ['left_rear_light', 'right_rear_light', 'breaklight_l', 'revlight_L', 'tembus_red.0'],
+      mirror: [],
+      interiorMats: ['Seat_Leather_white.0', 'Carpet.0', 'Carpet_Light.0', 'LCDs.0', 'texture_Buttons.0', 'movsteer_1.0.0', 'movsteer_1.0.1', 'mirror_inside.0', 'belt.0', 'door_lf.0', 'door_lf.5', 'Putih.0', 'hitam.0', 'JUST_BLACK.0'],
+      plates: { rear: 'platnomor' },
+    },
+    credit: { text: '"Tesla 2018 Model 3" โดย Ameer Studio — CC Attribution', url: 'https://sketchfab.com/3d-models/tesla-2018-model-3-5ef9b845aaf44203b6d04e2c677e444f' },
+    dims: { L: 4.694, W: 1.849, H: 1.443, WB: 2.875, fOH: 0.95, clear: 0.14 },
+    body: { hoodY: 0.93, trunkY: 0.99, beltY: 0.95, beltRise: 0.04, noseDrop: 0.22, tailDrop: 0.06,
+            rg: [0.16, 0.30], ws: [0.56, 0.75], roofRatio: 0.78 },
+    tire: { width: 235, aspect: 45, rim: 18 },
+    style: { head: 'swept', grille: 'bar', lower: 'wideSlot', tail: 'wrap', fog: false, drl: true, sharkfin: false },
+    colors: ['#f4f4f0', '#101114', '#5a6068', '#c8212f', '#2d4e8d', '#c3c6ca'],
+  },
+  {
+    id: 'crv-2026', make: 'Honda', model: 'CR-V', name: 'Honda CR-V Turbo AWD (2026)', years: '2023–ปัจจุบัน', code: 'RS6',
+    glb: 'models/crv-2026.glb',
+    glbConfig: {
+      rotY: 0, // model already faces +X
+      wheels: { FR: 'WHEEL_RF', FL: 'WHEEL_LF', RR: 'WHEEL_RR', RL: 'WHEEL_LR' },
+      hide: ['WHEEL_RF', 'WHEEL_LF', 'WHEEL_RR', 'WHEEL_LR'],
+      hideMats: ['TIRE_TREAD_SYMMETRY_SIDE_267388759', 'TIRE_TREAD_SYMMETRY_267388760', 'NH_547_MIRROR_wheel_267388770',
+               'ALUMINIUM_BRAKE_DISK_267388769', 'ALUMINIUM_EXT_BRAKE_267388762', 'BLACK_PAINTED_PARTS_267388766',
+               'METAL_PARTS_267388761', 'CHROME_PARTS_267388767', 'okumen_under_267388763', 'NH_892M_MIRROR_267388764'], // stock wheels/brakes/liners
+      anchorWheels: true,
+      paint: ['SlateGrayPearl_267389146', 'NH_731P_BODY_PAINT_267388825', 'NH_731P_BODY_PAINT_up_268823954', 'R_81_BODY_PAINT_267388814', 'NH_578_BODY_PAINT_267388843'],
+      windows: ['CLEAR_PARTS_window_267388821', 'DARK_GLASS_267388803'],
+      head: ['CLEAR_PARTS_headlight_267388788', 'CLEAR_PARTS_headlight_line_268296028', 'CLEAR_PARTS_headlight_naka_267388804', 'okumen_headlight_268293430', 'CLEAR_PARTS_fog_267388819'],
+      tail: ['CLEAR_PARTS_rearlight_267388791', 'CLEAR_PARTS_rearlight_2_268686054', 'CLEAR_PARTS_rearlight_line_268685601', 'CLEAR_PARTS_rearlight_naka_267388805', 'RED_FFMX_HH_PMMA_267388796', 'RED_FFMX_HH_PMMA_under_267388828', 'AMBER_FFMX_HH_PMMA_267388855'],
+      mirror: ['NH_762X_MIRROR_267388835'],
+      interiorMats: ['okumen_267388823', 'okumen_268264703', 'okumen_267388749', 'B_585X_PLASTIC_267388844', 'GRAY_PLASTIC_267388827', 'WHITE_PLASTIC_267388795', 'WHITE_PLASTIC_naka_268685803', 'WHITE_PLASTIC_H_130_267388793', 'NH_86_PLASTIC_267388807', 'BLACK_PMMA_PLASTIC_267388824', 'NH_900L_H_130_Substitute_for_BLACK_PARTS_268292898'],
+      plates: { front: 'Object_378', rear: 'Object_384' },
+    },
+    credit: { text: '"Honda CR-V (2026)" โดย geyges — Free Standard License', url: 'https://sketchfab.com/3d-models/honda-cr-v-2026-806e25ce44ed441c93ef265dcfe135f9' },
+    dims: { L: 4.694, W: 1.866, H: 1.681, WB: 2.70, fOH: 0.96, clear: 0.19 },
+    body: { hoodY: 1.08, trunkY: 1.12, beltY: 1.12, beltRise: 0.03, noseDrop: 0.18, tailDrop: 0.05,
+            rg: [0.18, 0.30], ws: [0.60, 0.78], roofRatio: 0.82 },
+    tire: { width: 235, aspect: 60, rim: 18 },
+    style: { head: 'slim', grille: 'barWide', lower: 'wideSlot', tail: 'wrap', fog: true, drl: true, sharkfin: true },
+    colors: ['#f4f4f0', '#101114', '#5a6068', '#8e9aa4', '#7a1f24', '#2d4e8d', '#5e6267'],
   },
 ];
 
@@ -500,6 +569,7 @@ export const DEFAULT_BUILD = {
   addons: [],
   kitPackage: null,
   engine: JSON.parse(JSON.stringify(DEFAULT_ENGINE)), // swap, performance parts and the player's tune
+  setup: { ...DEFAULT_SETUP }, // chassis/transmission tuning — free physics trade-offs
 };
 
 // Brand / style kit packages. Applying one sets several options at once.
@@ -596,39 +666,22 @@ export const KIT_PACKAGES = [
   },
 ];
 
-// Brands are shown in the spec and affect driving feel; geometry/lettering stays generic.
-export const WHEEL_BRANDS = [
-  { id: 'oem', name: 'Toyota (ล้อเดิม)', origin: 'ญี่ปุ่น', kg: 0 },
-  { id: 'generic', name: 'ไม่ระบุยี่ห้อ', origin: '—', kg: 0 },
-  { id: 'lenso', name: 'Lenso', origin: 'ไทย', kg: -8 },
-  { id: 'cosmis', name: 'Cosmis', origin: 'ไทย', kg: -10 },
-  { id: 'enkei', name: 'Enkei', origin: 'ญี่ปุ่น', kg: -16 },
-  { id: 'rays', name: 'RAYS (Volk / Gram Lights)', origin: 'ญี่ปุ่น', kg: -24 },
-  { id: 'work', name: 'WORK', origin: 'ญี่ปุ่น', kg: -14 },
-  { id: 'ssr', name: 'SSR', origin: 'ญี่ปุ่น', kg: -18 },
-  { id: 'advan', name: 'Advan', origin: 'ญี่ปุ่น', kg: -20 },
-  { id: 'weds', name: 'Weds', origin: 'ญี่ปุ่น', kg: -16 },
-  { id: 'bbs', name: 'BBS', origin: 'เยอรมนี', kg: -22 },
-  { id: 'oz', name: 'OZ Racing', origin: 'อิตาลี', kg: -22 },
-];
-// grip: lateral grip multiplier · comfort: ride softness (affects body motion a little)
-export const TIRE_BRANDS = [
-  { id: 'generic', name: 'ไม่ระบุยี่ห้อ', origin: '—', grip: 1.0, comfort: 1.0 },
-  { id: 'bridgestone', name: 'Bridgestone', origin: 'ญี่ปุ่น', grip: 1.06, comfort: 1.0 },
-  { id: 'michelin', name: 'Michelin', origin: 'ฝรั่งเศส', grip: 1.07, comfort: 1.08 },
-  { id: 'yokohama', name: 'Yokohama', origin: 'ญี่ปุ่น', grip: 1.06, comfort: 1.0 },
-  { id: 'toyo', name: 'Toyo', origin: 'ญี่ปุ่น', grip: 1.05, comfort: 0.98 },
-  { id: 'dunlop', name: 'Dunlop', origin: 'ญี่ปุ่น', grip: 1.04, comfort: 1.02 },
-  { id: 'goodyear', name: 'Goodyear', origin: 'สหรัฐฯ', grip: 1.04, comfort: 1.04 },
-  { id: 'continental', name: 'Continental', origin: 'เยอรมนี', grip: 1.06, comfort: 1.05 },
-  { id: 'maxxis', name: 'Maxxis', origin: 'ไต้หวัน', grip: 1.0, comfort: 1.0 },
-  { id: 'nankang', name: 'Nankang', origin: 'ไต้หวัน', grip: 1.02, comfort: 0.96 },
-  { id: 'deestone', name: 'Deestone', origin: 'ไทย', grip: 0.98, comfort: 1.0 },
-  { id: 'otani', name: 'Otani', origin: 'ไทย', grip: 0.98, comfort: 1.0 },
-];
-export const SHOCK_TYPES = [
-  { id: 'oem', name: 'โช้คเดิม', dropMax: 0, adjustable: false, spring: 2.5, damping: 8 },
-  { id: 'lowering', name: 'สปริงโหลด + โช้คแก๊ส', dropMax: 50, adjustable: false, spring: 4, damping: 14 },
-  { id: 'coilover', name: 'โช้คสตรัทปรับเกลียว (Coilover)', dropMax: 90, adjustable: true, spring: 6, damping: 16 },
-  { id: 'air', name: 'ถุงลม (Air suspension)', dropMax: 130, adjustable: true, spring: 3.5, damping: 12 },
-];
+// (WHEEL_BRANDS / TIRE_BRANDS / SHOCK_TYPES moved to engine.js — re-exported at the top)
+
+// Cars added through the /admin backend live in data/cars.json (not in this file).
+// Merged here at boot: { cars: [entry…], hidden: [built-in ids…] }. Returns the
+// added entries so main.js can register their physics specs (entry.specFrom).
+export async function loadExtraCars() {
+  let data = null;
+  try { data = await (await fetch('data/cars.json', { cache: 'no-store' })).json(); } catch { return []; }
+  for (const id of data?.hidden || []) {
+    const i = GENERATIONS.findIndex((g) => g.id === id);
+    if (i >= 0) GENERATIONS.splice(i, 1); // hidden built-in — saves with it fall back to default
+  }
+  const added = [];
+  for (const c of data?.cars || []) {
+    if (!c?.id || GENERATIONS.some((g) => g.id === c.id)) continue;
+    GENERATIONS.push(c); added.push(c);
+  }
+  return added;
+}
