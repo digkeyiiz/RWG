@@ -529,7 +529,7 @@ export class Online {
     const out = [];
     for (const p of this.peers.values()) {
       if (!p.pose) continue;
-      const kind = party?.has(p.username) ? 'party' : friends?.has(p.username) ? 'friend' : 'peer';
+      const kind = (p.username && party?.has(p.username)) ? 'party' : (p.username && friends?.has(p.username)) ? 'friend' : 'peer';
       out.push({ x: p.pose.x, z: p.pose.z, kind });
     }
     return out;

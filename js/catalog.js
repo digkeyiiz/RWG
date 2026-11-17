@@ -1,4 +1,5 @@
 import { DEFAULT_ENGINE, DEFAULT_SETUP, TIRE_BRANDS, WHEEL_BRANDS, SHOCK_TYPES } from './engine.js';
+import { CAR_PRICES } from './economy.js';
 // Tyre/wheel/shock physics data lives in engine.js (single source of truth for the
 // driving model); re-exported here because the customization UI thinks of them as catalog.
 export { TIRE_BRANDS, WHEEL_BRANDS, SHOCK_TYPES };
@@ -681,6 +682,7 @@ export async function loadExtraCars() {
   const added = [];
   for (const c of data?.cars || []) {
     if (!c?.id || GENERATIONS.some((g) => g.id === c.id)) continue;
+    CAR_PRICES[c.id] = c.price ?? 0; // economy must know the gen or the build gets stripped online
     GENERATIONS.push(c); added.push(c);
   }
   return added;

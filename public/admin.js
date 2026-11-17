@@ -139,7 +139,7 @@ function editCar(id) {
   $('cname').value = c.name || ''; $('cmake').value = c.make || ''; $('cmodel').value = c.model || '';
   $('cyears').value = c.years || ''; $('ccode').value = c.code || '';
   $('cglb').value = (c.glb || '').replace('models/', '');
-  $('cspec').value = c.specFrom || 'gen2';
+  $('cspec').value = c.specFrom || 'gen2'; $('cprice').value = c.price ?? 0;
   $('ctw').value = c.tire?.width || ''; $('cta').value = c.tire?.aspect || ''; $('ctr').value = c.tire?.rim || '';
   $('ccolors').value = (c.colors || []).join(',');
   $('cdL').value = c.dims?.L || ''; $('cdW').value = c.dims?.W || ''; $('cdH').value = c.dims?.H || ''; $('cdWB').value = c.dims?.WB || '';
@@ -159,7 +159,7 @@ async function saveCar() {
     const entry = {
       id: $('cid').value, name: $('cname').value, make: $('cmake').value, model: $('cmodel').value,
       years: $('cyears').value, code: $('ccode').value, glb: $('cglb').value || null, glbConfig,
-      specFrom: $('cspec').value,
+      specFrom: $('cspec').value, price: +$('cprice').value || 0,
       tire: { width: +$('ctw').value, aspect: +$('cta').value, rim: +$('ctr').value },
       dims: { L: +$('cdL').value, W: +$('cdW').value, H: +$('cdH').value, WB: +$('cdWB').value },
       colors: $('ccolors').value.split(',').map((s) => s.trim()).filter(Boolean),

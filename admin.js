@@ -40,6 +40,25 @@ function saveCars(data) {
   fs.writeFileSync(CARS_STORE, JSON.stringify(data, null, 2));
   fs.mkdirSync(path.dirname(CARS_PUBLIC), { recursive: true });
   fs.writeFileSync(CARS_PUBLIC, JSON.stringify(data, null, 2)); // copy the client fetches
+  syncCarPrices(data);
+}
+
+// register custom-car prices into the shared economy module (same ESM instance
+// rooms.js uses) — without this, sanitize() strips admin cars to 'gen2' on join
+let _customIds = new Set();
+async function syncCarPrices(data = null) {
+  try {
+    data ??= loadCars();
+    const E = await import(pathToFileURL(path.join(PUBLIC, 'js', 'economy.js')).href);
+    const G = await import(pathToFileURL(path.join(PUBLIC, 'js', 'engine.js')).href);
+    const ids = new Set();
+    for (const c of data.cars) {
+      E.CAR_PRICES[c.id] = c.price ?? 0; ids.add(c.id);
+      G.CAR_SPECS[c.id] = G.CAR_SPECS[c.specFrom] || G.CAR_SPECS.gen2; // lobby spec cards need this too
+    }
+    for (const id of _customIds) if (!ids.has(id)) { delete E.CAR_PRICES[id]; delete G.CAR_SPECS[id]; }
+    _customIds = ids;
+  } catch (e) { console.error('[admin] price sync:', e.message); }
 }
 
 let _catalog = null;
@@ -76,6 +95,7 @@ function cleanEntry(b) {
   e.style = (b.style && typeof b.style === 'object') ? { ...DEFAULT_STYLE, ...b.style } : DEFAULT_STYLE;
   if (Array.isArray(b.colors)) e.colors = b.colors.map((c) => String(c).slice(0, 9)).slice(0, 12);
   e.specFrom = String(b.specFrom || 'gen2').trim();
+  e.price = Math.max(0, Math.min(1e9, +b.price || 0)); // 0 = free car, 1 = matches the ฿1 shop
   if (b.credit && (b.credit.text || b.credit.url)) e.credit = { text: String(b.credit.text || '').slice(0, 120), url: String(b.credit.url || '').slice(0, 300) };
   return { entry: e };
 }
@@ -262,4 +282,4 @@ async function handle(req, res, u, rooms) {
   }
 }
 
-module.exports = { handleAdmin: handle };
+module.exports = { handleAdmin: handle, syncCarPrices };

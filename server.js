@@ -3,7 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { attachRooms } = require('./rooms');
-const { handleAdmin } = require('./admin');
+const { handleAdmin, syncCarPrices } = require('./admin');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT) || 3000;
@@ -82,6 +82,7 @@ const server = http.createServer((req, res) => {
 });
 
 const rooms = attachRooms(server);
+syncCarPrices(); // register admin-added car prices into the shared economy module
 
 server.listen(PORT, () => {
   console.log(`VIOS GARAGE server listening on http://localhost:${PORT}`);
