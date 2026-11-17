@@ -2,7 +2,8 @@
 import * as THREE from 'three';
 import { GENERATIONS, PAINT_FINISHES, EXTRA_COLORS, WHEEL_STYLES, WHEEL_FINISHES, FILM_TYPES, KIT, PLATE_STYLES, ADDONS, DEFAULT_BUILD, KIT_PACKAGES, WHEEL_BRANDS, TIRE_BRANDS, SHOCK_TYPES, LIVERIES, LIVERY_COLORS, EXHAUST_SOUNDS, SMOKE_COLORS } from './catalog.js';
 import { RIMS, RIM_WIDTHS, TIRE_WIDTHS, ASPECTS, TIRE_SIZES, TIRE_TYPES, autoAspect, buildWheel } from './wheels.js';
-import { normalizeEngine, computePerf, simulateRun, ENGINES, PARTS, carSpec, engineById } from './engine.js';
+import { normalizeEngine, computePerf, simulateRun, ENGINES, PARTS, carSpec, engineById, DEFAULT_SETUP } from './engine.js';
+import { fmtLap } from './lapsim.js';
 import { priceOf, carKey, engKey, partKey, buildKeys } from './economy.js';
 import { KIT_ICONS, LIVERY_ICONS, finishStyle } from './icons.js';
 import { Thumbs } from './thumbs.js';
@@ -15,6 +16,7 @@ const TABS = [
   { id: 'kit', icon: '🛠️', name: 'ชุดแต่ง' },
   { id: 'glass', icon: '💡', name: 'กระจก/ไฟ' },
   { id: 'suspension', icon: '⬇️', name: 'ช่วงล่าง' },
+  { id: 'setup', icon: '🎚️', name: 'เซ็ตอัพ' },
   { id: 'engine', icon: '🔥', name: 'เครื่อง' },
   { id: 'save', icon: '💾', name: 'ป้าย/เก็บ' },
 ];
@@ -88,6 +90,7 @@ export class Panel {
       <span><b>${Math.round(pf.peakHp)}</b> HP</span>
       <span>0-100 <b>${sim.t100 != null ? sim.t100.toFixed(1) + 's' : '—'}</b></span>
       <span>Top <b>${Math.round(sim.topKmh)}</b></span>
+      <span title="เวลารอบสนามโดยประมาณ (สนามอ้างอิง)">Lap <b>${fmtLap(pf.lapEst)}</b></span>
       <button class="ps-test" title="ทดสอบขับ / จับเวลา 0-100 และ 402 ม.">🧪 เทสรถ</button>`;
     strip.querySelector('.ps-test').onclick = () => this.onTestDrive?.();
   }
@@ -570,6 +573,43 @@ export class Panel {
     this.note('มีผลตอนขับ: สปริงแข็ง = ตัวรถโยกน้อย, ความหนืดสูง = หยุดโยกเร็ว, รถเตี้ย = จุดศูนย์ถ่วงต่ำ');
   }
 
+  // Setup tab — free chassis/transmission tuning; every knob is a physics trade-off, not an upgrade.
+  tab_setup() {
+    const s = { ...DEFAULT_SETUP, ...(this.b.setup || {}) };
+    const set = (fn, re = false) => this.set('setup', (b) => { b.setup ||= {}; fn(b.setup); }, re);
+    const pf = computePerf(this.b);
+    const hasWing = this.b.kit?.spoiler === 'gtwing' || this.b.kit?.spoiler === 'wing';
+
+    this.h('⚙️ เกียร์');
+    this.range('ระยะเกียร์ (spread)', -1, 1, 0.05, s.gearSpread, (v) => v === 0 ? 'กลาง' : v > 0 ? `กว้าง +${v.toFixed(2)} (เกียร์ 1 สั้น ปลายยาว)` : `แน่น ${v.toFixed(2)} (ถี่ ไม่ตกรอบ)`, (v) => set((x) => { x.gearSpread = v; }));
+    this.note('กว้าง = เกียร์ล่างสั้นลง เกียร์บนยาวขึ้น · แน่น = ทุกเกียร์ใกล้กัน · อัตราทดเฟืองท้ายปรับที่แท็บเครื่อง');
+
+    this.h('🛞 ยาง');
+    this.range('แรงดันลมยาง', 0.8, 1.2, 0.02, s.tirePsi, (v) => `${v.toFixed(2)}× ${v < 0.95 ? 'อ่อน (เกาะ เบรกนิ่ม)' : v > 1.05 ? 'แข็ง (ลื่น วิ่งเบา)' : 'กลาง'}`, (v) => set((x) => { x.tirePsi = v; }));
+    this.toggle('ยางหลังกว้างกว่าหน้า (Staggered)', s.tireWidthR != null, (v) => set((x) => { x.tireWidthR = v ? Math.min(315, (this.b.wheels.tireWidth || 185) + 40) : null; }, true));
+    if (s.tireWidthR != null) this.range('หน้ายางหลัง', this.b.wheels.tireWidth || 185, 315, 5, s.tireWidthR, (v) => `${v} มม.`, (v) => set((x) => { x.tireWidthR = v; }));
+    this.range('แคมเบอร์หลัง', -8, 1, 0.5, s.camberR ?? this.b.wheels.camber, (v) => `${v}°`, (v) => set((x) => { x.camberR = v; }));
+
+    this.h('🌬️ แอโร่');
+    if (hasWing) this.range('มุมปีก (wing angle)', 0, 1, 0.05, s.wingAngle, (v) => `${Math.round(v * 100)}% ${v > 0.8 ? 'โค้งแน่น หัวไมล์ช้า' : v < 0.3 ? 'ปลายไหล โค้งหลวม' : ''}`, (v) => set((x) => { x.wingAngle = v; }));
+    else this.note('ใส่ปีก (wing / GT wing) ในแท็บชุดแต่งก่อน ถึงจะปรับมุมโจมตีได้ — ชิ้นอื่นให้แรงกดคงที่');
+    this.note(`แรงกดปัจจุบัน CL ${pf.cl.toFixed(2)} · ลากพุง ×${(pf.dragMul || 1).toFixed(2)}`);
+
+    this.h('🛑 เบรก');
+    this.range('บาลานซ์เบรก', 0.55, 0.78, 0.01, s.brakeBias, (v) => `${Math.round(v * 100)}% หน้า ${v < 0.62 ? '(ท้ายปัดเข้าโค้ง)' : v > 0.72 ? '(ปลอดภัย หน้าดัน)' : ''}`, (v) => set((x) => { x.brakeBias = v; }));
+
+    this.h('🔩 กันโคลง & มุมล้อ');
+    this.range('ARB หน้า', 0, 1, 0.05, s.arbF, (v) => v === 0.5 ? 'กลาง' : v > 0.5 ? 'แข็ง (หน้าดัน)' : 'อ่อน', (v) => set((x) => { x.arbF = v; }));
+    this.range('ARB หลัง', 0, 1, 0.05, s.arbR, (v) => v === 0.5 ? 'กลาง' : v > 0.5 ? 'แข็ง (ท้ายปัด)' : 'อ่อน', (v) => set((x) => { x.arbR = v; }));
+    this.range('โทหน้า (toe)', -0.4, 0.4, 0.05, s.toeF, (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}° ${v > 0 ? 'ออก = หันไว' : v < 0 ? 'เข้า = นิ่งตรง' : ''}`, (v) => set((x) => { x.toeF = v; }));
+    this.range('โทหลัง', -0.4, 0.4, 0.05, s.toeR, (v) => `${v > 0 ? '+' : ''}${v.toFixed(2)}° ${v > 0 ? 'เข้า = นิ่ง' : v < 0 ? 'ออก = ท้ายคล่อง' : ''}`, (v) => set((x) => { x.toeR = v; }));
+
+    this.h('⚖️ น้ำหนักถ่วง (Ballast)');
+    this.range('น้ำหนักเพิ่ม', 0, 300, 10, s.ballast, (v) => v ? `+${v} กก.` : 'ไม่มี', (v) => set((x) => { x.ballast = v; }));
+    if (s.ballast > 0) this.range('ตำแหน่งตุ้ม', -1, 1, 0.1, s.ballastPos, (v) => v > 0 ? 'หน้า' : v < 0 ? 'หลัง' : 'กลาง', (v) => set((x) => { x.ballastPos = v; }));
+    this.note('ถ่วงน้ำหนักปรับคลาสแข่ง/ฝึกถ่ายน้ำหนัก — หนักขึ้นแต่เปลี่ยนบาลานซ์รถได้');
+  }
+
   plateSection() {
     const p = this.b.plate;
     this.h('🔖 ป้ายทะเบียน');
@@ -597,6 +637,17 @@ export class Panel {
     this.body.append(el('div', { class: 'dynobox' }, cv, live));
     const runBtn = el('button', { class: 'on' }, '▶ วิ่งไดโน');
     this.body.append(el('div', { class: 'btnrow' }, runBtn));
+    // engine condition (wear) — the real cost of a knock-risky tune, since parts are free
+    const drv = typeof window !== 'undefined' ? window.__vios?.driver : null;
+    if (drv) {
+      const cond = Math.round((1 - (drv.wear || 0)) * 100);
+      const repBtn = el('button', {}, '🔧 ซ่อมเครื่องยนต์');
+      repBtn.onclick = () => { drv.repair?.(); this.toast('🔧 ซ่อมเครื่องยนต์แล้ว — สภาพ 100%'); this.refresh(); };
+      this.body.append(el('div', { class: 'btnrow', style: 'align-items:center' },
+        el('span', { style: `font-size:12px;opacity:.85;color:${cond < 40 ? '#ff6a6a' : cond < 75 ? '#ffc95c' : '#8fe07f'}` },
+          `สภาพเครื่องยนต์ ${cond}%${cond < 100 ? ' — แรงม้าหายไป ' + Math.round((100 - cond) * 0.35) + '%' : ''}`),
+        cond < 100 ? repBtn : null));
+    }
 
     const fmtS = (x) => (x == null ? '—' : x.toFixed(1) + ' วิ');
     view.update = () => {
@@ -648,7 +699,8 @@ export class Panel {
     // parts
     this.h('🛠️ อะไหล่เพิ่มแรง');
     for (const [k, part] of Object.entries(PARTS)) {
-      if (k === 'brakes') this.h('🏁 ช่วงล่าง · เบรก · LSD');
+      if (k === 'internals') this.h('🧱 เครื่องยนต์ภายใน');
+      if (k === 'brakes') this.h('🏁 ช่วงล่าง · เบรก · ส่งกำลัง');
       const isTurboEng = engineById(e.swap || stockId).asp === 'turbo';
       const label = k === 'turbo' ? (isTurboEng ? 'อัปเกรดเทอร์โบ' : 'ติดเทอร์โบ (เทอร์โบคิท)') : part.name;
       this.chips(label, part.opts.map((o) => ({ id: o.id, name: o.name + (o.cost ? this.tag(partKey(b.gen, k, o.id)) : '') })), e.parts[k],

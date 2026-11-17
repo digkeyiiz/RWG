@@ -2,10 +2,11 @@
 // the server puts everyone into a shared world automatically.
 import { carShowcaseSummary } from './engine.js';
 import { GENERATIONS } from './catalog.js';
+import { TRACK_NAMES } from './game.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warpTo }) {
+export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warpTo, waypoint, watch }) {
   const btn = document.getElementById('btnOnline');
   const box = document.getElementById('onlineBox');
   const body = box.querySelector('.ob-body');
@@ -55,6 +56,7 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warp
       <div class="ob-l">เมือง ${esc(online.code)} · ${list.length + 1} คนในห้อง · ออนไลน์รวม ${online.online ?? (list.length + 1)} คน</div>
       <div class="ob-meet-bar">
         <button id="obMeetBtn" class="on">🚗 วาร์ปไป Car Meet</button>
+        <button id="obWpBtn" class="on" title="ปักหมุดรวมตัวที่ตำแหน่งคุณ — เพื่อนเห็นหอแสง+หมุดบนแผนที่ (ส่งให้เฉพาะปาร์ตี้ถ้าอยู่ในปาร์ตี้)">📍 ปักหมุดนัดเพื่อน</button>
         <div class="ob-crew-in"><input id="obCrewIn" maxlength="6" placeholder="แท็กคลับ (เช่น BKK)" value="${esc(online.me?.crew || '')}"><button id="obCrewBtn">ตั้ง</button></div>
       </div>
       <div class="ob-emotes" title="ส่งอีโมจิทักทายด่วน">
@@ -77,11 +79,12 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warp
             carHtml = ` <span class="ob-cls" style="color:${esc(sc.color)}">${esc(sc.cls)}${sc.pi}</span><small class="ob-spec">${esc(sc.carName)} · ${sc.cc.toLocaleString()}cc · ${sc.hp}HP</small>`;
           } catch {}
         }
-        return `<li><div class="ob-pname clickable" data-look="${p.id}" title="คลิกเพื่อดูโปรไฟล์รถ 3D">${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}${carHtml}<small>${p.username ? `@${esc(p.username)}` : ''}${p.inRace ? ' · 🏁 กำลังแข่ง' : ''}${distTxt}</small></div> <span class="ob-acts"><button data-warp="${p.id}" title="วาร์ปไปหาเพื่อนคนนี้">🚀</button><button data-look="${p.id}" title="ส่องรถ & สเปค 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
+        return `<li><div class="ob-pname clickable" data-look="${p.id}" title="คลิกเพื่อดูโปรไฟล์รถ 3D">${p.crew ? `<span class="crew-tag">[${esc(p.crew)}]</span> ` : ''}${esc(p.name)}${king}${carHtml}<small>${p.username ? `@${esc(p.username)}` : ''}${p.inRace ? ' · 🏁 กำลังแข่ง' : ''}${distTxt}</small></div> <span class="ob-acts"><button data-warp="${p.id}" title="วาร์ปไปหาเพื่อนคนนี้">🚀</button><button data-watch="${p.id}" title="ดูเพื่อนขับ (กล้องตาม)">👁</button><button data-look="${p.id}" title="ส่องรถ & สเปค 3D">🔍</button><button data-like="${p.id}" title="โหวตแต่งสวย">👍 ${p.likes || 0}</button><button data-id="${p.id}" title="ท้าแข่ง">⚔️</button></span></li>`;
       }).join('')}</ul>
       ${list.length ? '' : '<p class="ob-note">ยังไม่มีใครอื่นในเมืองตอนนี้ — ชวนเพื่อนเปิดเว็บเดียวกันก็จะเจอกันในเมืองเดียวทันที</p>'}
       <p class="ob-note">คลิกซ้าย/ขวาที่รถเพื่อนบนถนนหรือแผนที่เพื่อส่องสเปค · <kbd>H</kbd> แตร · <kbd>L</kbd> ไฟ · <kbd>V</kbd> เบิ้ล · <kbd>C</kbd> ท้าแข่ง</p>`;
     body.querySelector('#obMeetBtn').onclick = () => { open(false); carMeet?.(); };
+    body.querySelector('#obWpBtn').onclick = () => { waypoint?.(); toast('📍 ปักหมุดแล้ว — เพื่อนเห็นหอแสงสีฟ้า'); };
     body.querySelectorAll('.ob-emotes button').forEach((b) => {
       b.onclick = () => { online.chat(b.dataset.emote); toast('💬 ส่งทักทายแล้ว'); };
     });
@@ -107,6 +110,9 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warp
     body.querySelectorAll('[data-look]').forEach((b) => {
       b.onclick = () => { const p = online.peers.get(b.dataset.look); if (p) { open(false); inspect(p); } };
     });
+    body.querySelectorAll('button[data-watch]').forEach((b) => {
+      b.onclick = () => { const p = online.peers.get(b.dataset.watch); if (p) { open(false); watch?.(p); } };
+    });
     body.querySelectorAll('button[data-like]').forEach((b) => {
       b.onclick = async () => {
         const p = online.peers.get(b.dataset.like);
@@ -129,11 +135,53 @@ export function setupOnlineUI(online, { toast, challenge, inspect, carMeet, warp
     while (chatLog.children.length > 4) chatLog.firstChild.remove();
     setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 900); }, 6500);
   }
+  // race announcement in the chat channel — a live-updating line with a real join button;
+  // every race:lobbies broadcast rewrites it (joins, leaves, host retuning, or removal)
+  const annLines = new Map(); // lobby id → { el, btn }
+  function renderAnn(id) {
+    const ann = annLines.get(id);
+    if (!ann) return;
+    const l = (online.lobbies || []).find((x) => x.id === id);
+    if (!l) { ann.el.remove(); annLines.delete(id); return; }
+    const mine = l.ids.includes(online.myId);
+    ann.el.innerHTML = `<b>🏁 ${esc(l.host)}</b> เปิดแข่ง ${esc(TRACK_NAMES[l.track] || l.track)} · ${l.laps} รอบ · <b class="ann-n">${l.members.length}/8</b> <small>${l.members.map(esc).join(', ')}</small> `;
+    ann.el.append(ann.btn);
+    ann.btn.hidden = mine;          // members see no join button at all
+    ann.btn.disabled = false;       // re-enable if they left and want back in
+    ann.btn.textContent = 'เข้าร่วม';
+  }
+  function syncAnns(list) {
+    const ids = new Set(list.map((l) => l.id));
+    for (const [id, ann] of [...annLines]) {
+      if (!ids.has(id)) { ann.el.remove(); annLines.delete(id); }
+      else renderAnn(id);
+    }
+  }
+  function addChatRace(d) {
+    const el = document.createElement('div');
+    el.className = 'chat-line race-ann';
+    const btn = document.createElement('button');
+    btn.className = 'chat-join';
+    btn.textContent = 'เข้าร่วม';
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const r = await online.raceJoin(d.id);
+      if (!r?.ok) { btn.disabled = false; btn.textContent = 'ร่วมไม่ได้'; }
+    };
+    annLines.set(d.id, { el, btn });
+    renderAnn(d.id);
+    el.append(btn);
+    chatLog.append(el);
+    while (chatLog.children.length > 5) chatLog.firstChild.remove();
+    setTimeout(() => { el.classList.add('fade'); setTimeout(() => { el.remove(); annLines.delete(d.id); }, 900); }, 15000);
+  }
   chatForm.onsubmit = (e) => { e.preventDefault(); online.chat(chatIn.value); chatIn.value = ''; chatIn.blur(); chatForm.hidden = true; };
   chatIn.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.code === 'Escape') { chatIn.blur(); chatForm.hidden = true; } });
 
   online.on((ev) => {
     if (ev?.chat) { addChat(ev.chat); return; }
+    if (ev?.invite && !ev.invite.to && !ev.invite.edit) { addChatRace(ev.invite); return; }
+    if (ev?.lobbies) { syncAnns(ev.lobbies); return; }
     if (ev === 'peers' || ev === 'status' || ev?.hello || ev?.world) render();
   });
   render();

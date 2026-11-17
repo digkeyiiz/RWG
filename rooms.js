@@ -4,15 +4,20 @@
 // validate pickups / garage visits. Profiles persist in store/ (see store.js).
 const { Server } = require('socket.io');
 const { Store } = require('./store');
+const { S } = require('./gamesettings');
 const SPOTS = require('./world-spots.json');
 
-const WORLD_CAP = 64;
 const MAX_BUILD_BYTES = 8 * 1024;
 const STATE_LEN = 10;
-const ACTIVE_CASH = 30, ACTIVE_BIG = 3;
-const LOBBY_MS = 20000, COUNTDOWN_MS = 4500;
 
-const log = (...a) => console.log(new Date().toISOString(), '[world]', ...a);
+// in-memory event ring buffer for the /admin live log (per-process, newest last)
+const EVENTS = [];
+const log = (...a) => {
+  const msg = a.map((x) => (typeof x === 'object' ? JSON.stringify(x) : String(x))).join(' ');
+  EVENTS.push({ t: new Date().toISOString(), msg });
+  if (EVENTS.length > 800) EVENTS.splice(0, EVENTS.length - 800);
+  console.log(new Date().toISOString(), '[world]', ...a);
+};
 const eco = import('./public/js/economy.js');
 const plc = import('./public/js/places.js');
 const eng = import('./public/js/engine.js');
@@ -64,6 +69,11 @@ const d3 = (a, b) => Math.hypot(a.x - b.x, (a.y - b.y) * 1.5, a.z - b.z);
 function attachRooms(httpServer) {
   const io = new Server(httpServer, { path: '/mp', serveClient: false, maxHttpBufferSize: 32 * 1024, pingInterval: 10000, pingTimeout: 8000 });
   const store = new Store();
+  // everyone gets full money — also fills profiles created before the grant that never log in
+  eco.then((E) => {
+    const n = Number.isFinite(E.START_MONEY) ? store.grantAll(E.START_MONEY, 'money-fill') : 0;
+    if (n) log('money fill: topped up', n, 'profile(s) to', E.START_MONEY);
+  }).catch(() => {});
   const worlds = new Map();
   const presence = new Map(); // profile key → player session (one session per profile)
   const parties = new Map();  // party id → { id, leader: key, members: Set(key) }
@@ -86,18 +96,23 @@ function attachRooms(httpServer) {
   const nid = (p) => p + (++idSeq).toString(36);
 
   // ---------------- worlds
+  // The world owns its clock and weather so every player shares the same sky.
+  // hour advances at the client's pace: 1 real second = 1 game minute (day = 24 real min).
+  const worldHour = (w) => (w.hourBase + (Date.now() - w.hourT0) / 60000) % 24;
+  const worldT = (w) => ({ hour: worldHour(w), weather: w.weather });
   function newWorld() {
-    const w = { id: 'W' + (++worldSeq), players: new Map(), cash: new Map(), lobbies: new Map(), races: new Map() };
+    const w = { id: 'W' + (++worldSeq), players: new Map(), cash: new Map(), lobbies: new Map(), races: new Map(),
+      hourT0: Date.now(), hourBase: 15 + Math.random() * 8, weather: 'clear', weatherT: Date.now(), syncT: 0 };
     worlds.set(w.id, w);
-    for (let i = 0; i < ACTIVE_CASH; i++) spawnCash(w, false);
-    for (let i = 0; i < ACTIVE_BIG; i++) spawnCash(w, true);
+    for (let i = 0; i < S.get('activeCash'); i++) spawnCash(w, false);
+    for (let i = 0; i < S.get('activeBig'); i++) spawnCash(w, true);
     log('world open', w.id);
     return w;
   }
   // fill worlds densely so players meet each other; open a new one only when all are full
   function pickWorld() {
     let best = null;
-    for (const w of worlds.values()) if (w.players.size < WORLD_CAP && (!best || w.players.size > best.players.size)) best = w;
+    for (const w of worlds.values()) if (w.players.size < S.get('worldCap') && (!best || w.players.size > best.players.size)) best = w;
     return best || newWorld();
   }
   function spawnCash(w, big) {
@@ -133,7 +148,7 @@ function attachRooms(httpServer) {
   const lobbyList = (w) => [...w.lobbies.values()].map((l) => ({
     id: l.id, track: l.track, laps: l.laps, host: l.hostName, hostId: l.host,
     hostSpec: l.hostSpec || null, toId: l.to || null, toName: l.toName || null,
-    ids: [...l.members], members: [...l.members].map((sid) => w.players.get(sid)?.name).filter(Boolean),
+    ids: [...l.members], members: [...l.members].map((sid) => w.players.get(sid)?.name).filter(Boolean), bots: l.bots,
     startsIn: Math.max(0, l.t - Date.now()),
   }));
   const me = (p) => ({ username: p.prof.username || null, crew: p.prof.crew || null, likes: p.prof.likes || 0, friends: (p.prof.friends || []).map(uname).filter(Boolean), requests: (p.prof.freq || []).map(uname).filter(Boolean), money: p.prof.money, rep: p.prof.rep, owned: p.prof.owned, discovered: p.prof.discovered, races: p.prof.races, wins: p.prof.wins, best: p.prof.best, stuntBest: p.prof.stuntBest || 0, stuntTotal: p.prof.stuntTotal || 0, name: p.prof.name, bounty: p.prof.bounty || 0, escapes: p.prof.escapes || 0, busted: p.prof.busted || 0 });
@@ -168,13 +183,13 @@ function attachRooms(httpServer) {
       const pl = w.players.get(sid);
       if (pl) specs[sid] = await compactSpec(pl.build);
     }));
-    const race = { id: lobby.id, track: lobby.track, laps: lobby.laps, bots: lobby.bots, diff: lobby.diff ?? 0, members, specs, t0: Date.now() + COUNTDOWN_MS, prog: new Map(), fin: [], seed: Math.floor(Math.random() * 1e9) };
+    const race = { id: lobby.id, track: lobby.track, laps: lobby.laps, bots: lobby.bots, diff: lobby.diff ?? 0, members, specs, t0: Date.now() + S.get('countdownMs'), prog: new Map(), fin: [], seed: Math.floor(Math.random() * 1e9) };
     w.races.set(race.id, race);
     const host = w.players.get(lobby.host);
     for (const sid of members) {
       const p = w.players.get(sid); p.raceId = race.id;
       emitPeerSync(w, p);
-      io.to(sid).emit('race:start', { raceId: race.id, cfg: { track: race.track, laps: race.laps, bots: race.bots, diff: race.diff, traffic: false, seed: race.seed }, grid: members, specs, inMs: COUNTDOWN_MS, by: host?.name || '' });
+      io.to(sid).emit('race:start', { raceId: race.id, cfg: { track: race.track, laps: race.laps, bots: race.bots, diff: race.diff, traffic: false, seed: race.seed }, grid: members, specs, inMs: S.get('countdownMs'), by: host?.name || '' });
     }
     io.to(w.id).emit('race:lobbies', lobbyList(w));
     log('race start', w.id, race.track, `laps=${race.laps}`, `players=${members.length}`, `bots=${race.bots}`);
@@ -205,12 +220,23 @@ function attachRooms(httpServer) {
   const curHeat = (pu, now) => Math.max(1, Math.min(5, pu.want || 1, 1 + Math.floor((now - pu.t0) / HEAT_STEP_MS)));
   setInterval(() => {
     const now = Date.now();
-    for (const w of worlds.values()) for (const l of w.lobbies.values()) if (now >= l.t) startRace(w, l);
+    for (const w of worlds.values()) {
+      for (const l of w.lobbies.values()) if (now >= l.t) startRace(w, l);
+      // weather drifts per world (~every 15–30 min of uptime, min 6 min between flips)
+      if (now - w.weatherT > 6 * 60000 && Math.random() < 0.035) {
+        w.weatherT = now;
+        w.weather = w.weather === 'rain' ? 'clear' : 'rain';
+        io.to(w.id).emit('world:t', worldT(w));
+      }
+      // periodic clock resync keeps every client converged on the world hour
+      w.syncT += 500;
+      if (w.syncT >= 75000) { w.syncT = 0; io.to(w.id).emit('world:t', worldT(w)); }
+    }
   }, 500).unref();
 
   io.on('connection', (sock) => {
     let w = null, p = null;
-    let stateBudget = 30, raceBudget = 8, chatAt = 0;
+    let stateBudget = 30, raceBudget = 8, chatAt = 0, wpAt = 0;
     const refill = setInterval(() => { stateBudget = 30; raceBudget = 8; }, 1000);
     const recent = new Map(); // request id → result (idempotent buys)
 
@@ -245,7 +271,7 @@ function attachRooms(httpServer) {
       if (old) { io.to(old.id).emit('kicked', { reason: 'เข้าสู่ระบบจากที่อื่น' }); io.sockets.sockets.get(old.id)?.disconnect(true); }
       // a party member joins the leader's world
       const pt = partyOf(rec.key), lead = pt && presence.get(pt.leader);
-      w = lead?.w && worlds.has(lead.w.id) && lead.w.players.size < WORLD_CAP + 4 ? lead.w : pickWorld();
+      w = lead?.w && worlds.has(lead.w.id) && lead.w.players.size < S.get('worldCap') + 4 ? lead.w : pickWorld();
       p = { id: sock.id, key: rec.key, prof: rec.p, name: rec.p.name, build, pose: null, lastS: null, raceId: null, garage: null, lastSoloPrize: 0, lastStuntAt: 0, stuntMinAt: 0, stuntMinPts: 0, w };
       presence.set(rec.key, p);
       for (const fk of rec.p.friends || []) sendTo(fk, 'friend:online', { username: rec.p.username, name: rec.p.name, online: true });
@@ -254,9 +280,9 @@ function attachRooms(httpServer) {
       w.players.set(sock.id, p);
       sock.join(w.id);
       sock.to(w.id).emit('peer+', pubPlayer(p));
-      log('join', w.id, rec.p.name, `(${w.players.size}/${WORLD_CAP})`, rec.created ? 'new' : '');
+      log('join', w.id, rec.p.name, `(${w.players.size}/${S.get('worldCap')})`, rec.created ? 'new' : '');
       if (pt) { pushParty(pt); }
-      cb({ ok: true, token, id: sock.id, world: w.id, players: others, me: me(p), build: fixed ? build : null, cash: [...w.cash.values()].map(({ id, x, y, z, v, big }) => ({ id, x, y, z, v, big })), lobbies: lobbyList(w), online: [...worlds.values()].reduce((n, x) => n + x.players.size, 0) });
+      cb({ ok: true, token, id: sock.id, world: w.id, players: others, me: me(p), build: fixed ? build : null, cash: [...w.cash.values()].map(({ id, x, y, z, v, big }) => ({ id, x, y, z, v, big })), lobbies: lobbyList(w), online: [...worlds.values()].reduce((n, x) => n + x.players.size, 0), worldT: worldT(w) });
     });
 
     const leave = () => {
@@ -317,8 +343,20 @@ function attachRooms(httpServer) {
     });
     sock.on('car:act', (d = {}) => {
       if (!w || raceBudget-- <= 0) return;
-      const kind = d.kind === 'horn' || d.kind === 'flash' || d.kind === 'rev' ? d.kind : null;
+      const kind = d.kind === 'horn' || d.kind === 'flash' || d.kind === 'rev' || d.kind === 'nos' ? d.kind : null;
       if (kind) sock.to(w.id).emit('car:act', { id: sock.id, kind, name: p.name });
+    });
+    // convoy waypoint: one pin every 4 s per player, party-scoped when asked
+    sock.on('waypoint', (d = {}) => {
+      if (!w || !p) return;
+      const now = Date.now();
+      if (now - wpAt < 4000) return; wpAt = now;
+      const x = +d.x, z = +d.z;
+      if (!Number.isFinite(x) || !Number.isFinite(z) || Math.hypot(x, z) > 60000) return;
+      const scope = d.scope === 'party' ? 'party' : 'room';
+      const pt = scope === 'party' ? partyOf(p.key) : null;
+      const targets = pt ? [...pt.members].map((k) => presence.get(k)).filter((q) => q && q.w === w) : [...w.players.values()];
+      for (const q of targets) io.to(q.id).emit('waypoint', { x, z, by: p.name, scope });
     });
 
     // ---- cash: server checks you are really next to it (last pose < 1.5 s old)
@@ -407,13 +445,13 @@ function attachRooms(httpServer) {
       const to = typeof d.to === 'string' && d.to !== sock.id && w.players.has(d.to) ? d.to : null;
       const toName = to ? (w.players.get(to)?.name || null) : null;
       const hostSpec = await compactSpec(p.build);
-      const l = { id: nid('r'), host: sock.id, hostName: p.name, hostSpec, track, laps, bots, diff, to, toName, members: new Set([sock.id]), t: Date.now() + (d.now && !to ? 0 : LOBBY_MS) };
+      const l = { id: nid('r'), host: sock.id, hostName: p.name, hostSpec, track, laps, bots, diff, to, toName, members: new Set([sock.id]), t: Date.now() + (d.now && !to ? 0 : to ? S.get('lobbyMs') : S.get('openMs')) };
       const pt = d.party && partyOf(p.key);
       if (pt) {
         for (const k of pt.members) { const q = presence.get(k); if (q && q.w === w && !q.raceId) { l.members.add(q.id); if (q !== p) io.to(q.id).emit('race:party', { host: p.name, track, laps }); } }
         l.t = Math.max(l.t, Date.now() + 8000);
       }
-      if (to) l.t = Math.max(l.t, Date.now() + LOBBY_MS); // a challenge always waits for the answer
+      if (to) l.t = Math.max(l.t, Date.now() + S.get('lobbyMs')); // a challenge always waits for the answer
       w.lobbies.set(l.id, l);
       io.to(w.id).emit('race:lobbies', lobbyList(w));
       if (!d.now || to) sock.to(w.id).emit('race:invite', { id: l.id, host: p.name, hostId: sock.id, track, laps, bots, to, toName, hostSpec });
@@ -457,6 +495,21 @@ function attachRooms(httpServer) {
       if (!w) return;
       for (const l of w.lobbies.values()) if (l.host === sock.id) startRace(w, l);
     });
+    // host retunes the open lobby while people gather (track/laps/bots)
+    sock.on('race:edit', async (d = {}, cb) => {
+      if (!w || typeof cb !== 'function') return;
+      for (const l of w.lobbies.values()) if (l.host === sock.id) {
+        const E = await eco;
+        if (E.TRACKS[d.track]) l.track = d.track;
+        if (Number.isInteger(d.laps) && d.laps >= 1 && d.laps <= 5) l.laps = d.laps;
+        if (Number.isInteger(d.bots) && d.bots >= 0 && d.bots <= 5) l.bots = d.bots;
+        if (Number.isInteger(d.diff) && d.diff >= 0 && d.diff <= 3) l.diff = d.diff;
+        io.to(w.id).emit('race:lobbies', lobbyList(w));
+        io.to(w.id).emit('race:invite', { id: l.id, host: p.name, hostId: sock.id, track: l.track, laps: l.laps, bots: l.bots, to: l.to, toName: l.toName, hostSpec: l.hostSpec, edit: 1 });
+        return cb({ ok: true });
+      }
+      cb({ ok: false });
+    });
     sock.on('race:p', (q = {}) => {
       if (!w || !p.raceId || raceBudget-- <= 0) return;
       const r = w.races.get(p.raceId);
@@ -486,7 +539,7 @@ function attachRooms(httpServer) {
       let pos = r.fin.length;
       if (racers === 1) pos = Math.max(0, Math.min(7, (Number(q.place) || 1) - 1)); // vs bots: place reported by the client
       r.fin.push({ sid: sock.id, t });
-      let prize = E.racePrize(r.track, r.laps, pos, racers, r.bots);
+      let prize = Math.round(E.racePrize(r.track, r.laps, pos, racers, r.bots) * S.get('prizeMul'));
       if (racers === 1 && Date.now() - p.lastSoloPrize < 60000) prize = 0; // anti-farming
       if (racers === 1 && prize) p.lastSoloPrize = Date.now();
       const rep = E.repFor(pos, racers);
@@ -581,7 +634,7 @@ function attachRooms(httpServer) {
       nw.players.set(sock.id, p);
       sock.join(nw.id);
       sock.to(nw.id).emit('peer+', pubPlayer(p));
-      sock.emit('world', { world: nw.id, players: others, cash: [...nw.cash.values()].map(({ id, x, y, z, v, big }) => ({ id, x, y, z, v, big })), lobbies: lobbyList(nw) });
+      sock.emit('world', { world: nw.id, players: others, cash: [...nw.cash.values()].map(({ id, x, y, z, v, big }) => ({ id, x, y, z, v, big })), lobbies: lobbyList(nw), worldT: worldT(nw) });
       if (oldW.players.size === 0 && worlds.size > 1) {
         worlds.delete(oldW.id);
         log('world close', oldW.id);
@@ -672,7 +725,7 @@ function attachRooms(httpServer) {
       if (!allowed) return cb({ ok: false, err: 'วาร์ปได้เฉพาะไปหาเพื่อนหรือคนในปาร์ตี้' });
       if (!q) return cb({ ok: false, err: 'เพื่อนออฟไลน์อยู่' });
       if (p.raceId) return cb({ ok: false, err: 'กำลังแข่งอยู่' });
-      if (q.w !== w && q.w.players.size >= WORLD_CAP + 4) return cb({ ok: false, err: 'เมืองของเพื่อนเต็ม' });
+      if (q.w !== w && q.w.players.size >= S.get('worldCap') + 4) return cb({ ok: false, err: 'เมืองของเพื่อนเต็ม' });
       switchWorld(q.w);
       cb({ ok: true, pose: q.pose ? { x: q.pose.x, y: q.pose.y, z: q.pose.z, h: q.lastS ? q.lastS[3] : 0 } : null, id: q.id });
     });
@@ -689,7 +742,7 @@ function attachRooms(httpServer) {
       }
       if (!q || q === p) return cb({ ok: false, err: 'ผู้เล่นออฟไลน์แล้ว' });
       if (q.w !== w) {
-        if (q.w.players.size >= WORLD_CAP + 4) return cb({ ok: false, err: 'เมืองนี้เต็มชั่วคราว' });
+        if (q.w.players.size >= S.get('worldCap') + 4) return cb({ ok: false, err: 'เมืองนี้เต็มชั่วคราว' });
         switchWorld(q.w);
       }
       cb({ ok: true, id: q.id, name: q.name, inGarage: !!q.garage, pose: q.pose ? { x: q.pose.x, y: q.pose.y, z: q.pose.z, h: q.lastS ? q.lastS[3] : 0 } : null });
@@ -724,7 +777,7 @@ function attachRooms(httpServer) {
       // join the leader in their world
       const lead = presence.get(pt.leader);
       let pose = null;
-      if (lead && lead.w !== w && !p.raceId && lead.w.players.size < WORLD_CAP + 4) { switchWorld(lead.w); }
+      if (lead && lead.w !== w && !p.raceId && lead.w.players.size < S.get('worldCap') + 4) { switchWorld(lead.w); }
       if (lead?.pose) pose = { x: lead.pose.x, y: lead.pose.y, z: lead.pose.z, h: lead.lastS ? lead.lastS[3] : 0 };
       cb({ ok: true, pose });
     });
@@ -746,15 +799,26 @@ function attachRooms(httpServer) {
       if (pts < 150 || p.stuntMinPts + pts > 150000) return cb({ ok: false });
       const E = await eco;
       const rw = E.stuntReward(pts);
+      rw.cash = Math.round(rw.cash * S.get('stuntMul')); rw.rep = Math.round(rw.rep * S.get('stuntMul'));
+      // tandem drift: another driver within 35 m of your last pose → +25% cash, +1 rep,
+      // and the partner gets a toast so they know they were part of the train
+      let tandem = null;
+      if (p.pose && Date.now() - p.pose.t < 3000) {
+        for (const q of w.players.values()) {
+          if (q !== p && q.pose && Date.now() - q.pose.t < 3000 &&
+              Math.hypot(q.pose.x - p.pose.x, q.pose.z - p.pose.z) < S.get('tandemRadius')) { tandem = q; break; }
+        }
+      }
+      if (tandem) { rw.cash = Math.round(rw.cash * S.get('tandemMul')); rw.rep += 1; io.to(tandem.id).emit('stunt:tandem', { by: p.name }); }
       p.lastStuntAt = now;
       p.stuntMinPts += pts;
       p.prof.stuntTotal = (p.prof.stuntTotal || 0) + pts;
       const isBest = pts > (p.prof.stuntBest || 0);
       if (isBest) p.prof.stuntBest = pts;
       p.prof.rep += rw.rep;
-      credit(p, rw.cash, 'stunt', { pts, kind: String(d.kind || '').slice(0, 24) });
+      credit(p, rw.cash, 'stunt', { pts, kind: String(d.kind || '').slice(0, 24), tandem: tandem?.name || null });
       emitPeerSync(w, p);
-      cb({ ok: true, pts, cash: rw.cash, rep: rw.rep, best: isBest, me: me(p) });
+      cb({ ok: true, pts, cash: rw.cash, rep: rw.rep, best: isBest, me: me(p), tandem: tandem?.name || null });
     });
     // record personal drag test times (0-100 km/h & 402m quarter mile)
     sock.on('drag:best', (d = {}, cb) => {
@@ -802,7 +866,21 @@ function attachRooms(httpServer) {
     sock.on('disconnect', () => { clearInterval(refill); leave(); });
   });
 
-  return { stats: () => ({ worlds: worlds.size, players: [...worlds.values()].reduce((n, w) => n + w.players.size, 0) }) };
+  return {
+    stats: () => ({ worlds: worlds.size, players: [...worlds.values()].reduce((n, w) => n + w.players.size, 0) }),
+    admin: () => ({
+      worlds: [...worlds.values()].map((w) => ({ id: w.id, players: w.players.size, lobbies: (w.lobbies || new Map()).size })),
+      players: [...worlds.values()].flatMap((w) => [...w.players.values()].map((p) => ({
+        id: p.id, world: w.id, name: p.name, username: p.prof.username || null,
+        car: p.build?.gen || null, money: p.prof.money || 0, rep: p.prof.rep || 0,
+        wins: p.prof.wins || 0, races: p.prof.races || 0, bounty: p.prof.bounty || 0,
+        racing: !!p.raceId, inGarage: !!p.garage,
+        pos: p.pose ? { x: Math.round(p.pose.x), z: Math.round(p.pose.z) } : null,
+      }))),
+      events: EVENTS.slice(-500),
+      store,
+    }),
+  };
 }
 
-module.exports = { attachRooms, WORLD_CAP };
+module.exports = { attachRooms, WORLD_CAP: S.get('worldCap') };

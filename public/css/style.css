@@ -178,6 +178,13 @@ button.danger { background: rgba(255,79,109,0.15); border-color: rgba(255,79,109
 #chatLog .chat-line { background: #000a; border-radius: 8px; padding: 4px 10px; font-size: 14px; transition: opacity 1s; }
 #chatLog .chat-line b { color: var(--acc); margin-right: 4px; }
 #chatLog .chat-line.fade { opacity: 0; }
+#chatLog .chat-line.race-ann { pointer-events: auto; border: 1px solid #4cc3ff55; }
+#chatLog .chat-join { margin-left: 8px; padding: 2px 10px; border: 0; border-radius: 8px; background: var(--acc); color: #04121c; font: 700 12px Kanit, sans-serif; cursor: pointer; }
+#chatLog .chat-join:disabled { opacity: .6; cursor: default; }
+#lobbies .lb-members { grid-column: 1 / -1; display: block; color: #9fd4ff; font-size: 11px; }
+#lobbies .lb-edit { grid-column: 1 / -1; display: flex; gap: 3px; margin: 4px 0; }
+#lobbies .lb-edit button { flex: 1; padding: 2px 4px; font-size: 11px; border: 1px solid #ffffff22; background: #ffffff08; color: #dfe9f5; border-radius: 7px; cursor: pointer; }
+#lobbies .lb-edit button.on { background: var(--acc); color: #04121c; border-color: var(--acc); }
 #chatForm { position: fixed; left: 14px; bottom: 200px; z-index: 4; width: 300px; }
 #chatForm input { width: 100%; font: inherit; font-size: 13px; color: var(--txt); background: #000a; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
 body:not(.city) #chatForm, body:not(.city) #chatLog { display: none; }

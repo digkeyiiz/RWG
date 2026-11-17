@@ -82,6 +82,14 @@ export class Minimap {
         g.fillRect(x - 6, z - 6, 12, 12);
         continue;
       }
+      if (ic.kind === 'wp') {
+        // convoy waypoint — pulsing cyan diamond
+        const s = 13 + Math.sin(performance.now() / 220) * 3;
+        g.fillStyle = '#4cc3ff'; g.strokeStyle = '#fff'; g.lineWidth = 3;
+        g.beginPath(); g.moveTo(x, z - s); g.lineTo(x + s * 0.7, z); g.lineTo(x, z + s); g.lineTo(x - s * 0.7, z); g.closePath();
+        g.fill(); g.stroke();
+        continue;
+      }
       if (ic.kind === 'cash' || ic.kind === 'big') {
         g.fillStyle = ic.kind === 'big' ? '#ffc23a' : '#36ff8a';
         g.beginPath(); g.arc(x, z, ic.kind === 'big' ? 9 : 5, 0, Math.PI * 2); g.fill();
@@ -93,8 +101,11 @@ export class Minimap {
     }
     g.fillStyle = '#e8e8e8';
     for (const c of cars) if (c.x !== undefined) g.fillRect(toPx(c.x) - toPx(px) - 3, toPx(c.z) - toPx(pz) - 3, 6, 6);
-    g.fillStyle = '#ffb02e';
-    for (const c of peers) { g.beginPath(); g.arc(toPx(c.x) - toPx(px), toPx(c.z) - toPx(pz), 7, 0, Math.PI * 2); g.fill(); }
+    for (const c of peers) {
+      // party = green, friend = cyan, stranger = orange — spot your people at a glance
+      g.fillStyle = c.kind === 'party' ? '#4dff88' : c.kind === 'friend' ? '#4cc3ff' : '#ffb02e';
+      g.beginPath(); g.arc(toPx(c.x) - toPx(px), toPx(c.z) - toPx(pz), 7, 0, Math.PI * 2); g.fill();
+    }
     g.restore();
     g.fillStyle = '#4cc3ff'; g.strokeStyle = '#000'; g.lineWidth = 2;
     g.beginPath(); g.moveTo(R, R - 10); g.lineTo(R + 7, R + 8); g.lineTo(R, R + 4); g.lineTo(R - 7, R + 8); g.closePath(); g.fill(); g.stroke();

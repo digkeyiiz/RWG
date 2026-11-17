@@ -38,7 +38,10 @@ export class Social {
   async refresh() {
     if (!this.online.inRoom) { this.render(); return; }
     const r = await this.online.friends();
-    if (r?.ok) { this.data = r; this.party = r.party; }
+    if (r?.ok) {
+      this.data = r; this.party = r.party;
+      this.online.partyUsernames = r.party ? new Set(r.party.members.map((m) => m.username)) : null;
+    }
     this.render();
   }
 
@@ -58,7 +61,7 @@ export class Social {
       case 'friend:req': this.game.feed(`👥 <b>${esc(d.name)}</b> (@${esc(d.username)}) ขอเป็นเพื่อน — เปิดเมนู 👥`, 'invite'); this.game.sound('ping'); break;
       case 'friend:ok': this.game.feed(`✅ <b>${esc(d.name)}</b> เป็นเพื่อนกับคุณแล้ว`); break;
       case 'friend:online': this.game.feed(d.online ? `🟢 เพื่อน <b>${esc(d.name)}</b> ออนไลน์` : `⚪ เพื่อน <b>${esc(d.name)}</b> ออฟไลน์`); break;
-      case 'party': this.party = d; if (!d) this.partyLog = []; break;
+      case 'party': this.party = d; this.online.partyUsernames = d ? new Set(d.members.map((m) => m.username)) : null; if (!d) this.partyLog = []; break;
       case 'party:invite': this.card(`🎉 <b>${esc(d.name)}</b> ชวนเข้าปาร์ตี้`, [['เข้าร่วม', async () => {
         const r = await this.online.partyJoin(d.id);
         if (!r.ok) return this.toast(r.err);

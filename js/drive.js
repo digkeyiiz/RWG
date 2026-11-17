@@ -1,13 +1,14 @@
 // Arcade driving model + input + synthesized engine sound.
 import * as THREE from 'three';
 import { TIRE_BRANDS, SHOCK_TYPES, WHEEL_BRANDS } from './catalog.js';
-import { rpmFor, driveForce, dragAccel, WHEEL_R } from './engine.js';
+import { rpmFor, driveForce, dragAccel, buildMu, buildCl, WHEEL_R } from './engine.js';
 
 export class Driver {
   constructor(car, world) {
     this.car = car; this.world = world;
     this.keys = {};
     this.touch = { gas: 0, brake: 0, left: 0, right: 0, hand: 0, nos: 0, steer: 0 };
+    this.wear = 0; // engine condition 0..1 — persists across respawns until repaired in the garage
     this.reset();
     addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT') return;
@@ -51,6 +52,8 @@ export class Driver {
   }
   // performance profile from engine.js computePerf(build); null → old arcade model
   setPerf(perf) { this.perf = perf; if (this.gi >= perf.gears.length) this.gi = perf.gears.length - 1; }
+  // garage repair — restores a worn engine to full health
+  repair() { this.wear = 0; }
 
   reset(spawn = null) {
     this.pos = new THREE.Vector3(spawn?.x ?? 0, 0, spawn?.z ?? 0);
@@ -100,31 +103,29 @@ export class Driver {
     const w = this.car.b.wheels;
     const tb = TIRE_BRANDS.find((t) => t.id === w.tireBrand) || TIRE_BRANDS[0];
     const wb = WHEEL_BRANDS.find((b) => b.id === w.brand) || WHEEL_BRANDS[0];
-    const typeGrip = { comfort: 1.0, sport: 1.1, directional: 1.08, semislick: 1.25 }[w.tireType] || 1;
-    const widthGrip = 1 + (w.tireWidth - 185) / 380;
     const cam = Math.abs(w.camber || 0);
-    // -1° to -3.5° negative camber boosts cornering grip; extreme stance (>4.5°) trades grip for drift slip
-    const camberLat = cam <= 3.5 ? 1 + cam * 0.018 : Math.max(0.86, 1.063 - (cam - 3.5) * 0.032);
+    // -1° to -3.5° negative camber boosts cornering grip; extreme stance trades grip for drift slip
     const camberLong = cam <= 3 ? 1 : Math.max(0.88, 1 - (cam - 3) * 0.018);
     const susp = this.car.b.suspension;
-    const shock = SHOCK_TYPES.find((s) => s.id === susp.type) || SHOCK_TYPES[0];
-    const shockGrip = { oem: 1, lowering: 1.02, coilover: 1.05, air: 0.99 }[shock.id] || 1;
     const kit = this.car.b.kit || {};
-    const wideGrip = kit.fender === 'wide' ? 1.04 : kit.fender === 'overfender' ? 1.025 : 1;
     const surf = this.env?.surfaceMu ? this.env.surfaceMu(this.pos.x, this.pos.z, this.y) : 1;
-    const mu = tb.grip * typeGrip * widthGrip * camberLat * shockGrip * wideGrip * surf;
+    // perf.mu*/buildMu is the single source for tyre grip — per-axle (staggered fitment)
+    // with the chassis soft cap; surface friction multiplies on top.
+    const mus = this.perf?.muF != null ? { f: this.perf.muF, r: this.perf.muR, avg: this.perf.mu } : buildMu(this.car.b);
+    const muF0 = mus.f * surf, muR0 = mus.r * surf;
+    const mu = mus.avg * surf;
     this.grip = mu; this.surface = surf;
     const pf = this.perf, R = this.car.tire?.outerR || WHEEL_R;
     const drv = pf?.drive || 'FF';
     const m = Math.max(780, (pf?.mass || 1100) + (wb.kg || 0)), WB = P.gen.dims.WB, g = 9.81;
-    const frontShare = { FF: 0.61, FR: 0.53, AWD: 0.58 }[drv] ?? 0.6;
+    const frontShare = ({ FF: 0.61, FR: 0.53, AWD: 0.58 }[drv] ?? 0.6) + (pf?.frontBias || 0);
     const a_ = WB * (1 - frontShare), b_ = WB * frontShare; // CG → front axle, CG → rear axle
     const hcg = Math.max(0.38, 0.53 - (susp.drop || 0) / 1000);
     const Iz = m * a_ * b_ * 1.12;
     const assist = this.ctl.assist;
     const delta = this.steer;
     // ---- gearbox / engine (automatic or manual) ----
-    let Fdrive = 0, Fbrake = 0, reverse = false, rpmNow = 900;
+    let Fdrive = 0, Fbrake = 0, reverse = false, rpmNow = 900, jerk = 0;
     if (pf) {
       this.shiftT = Math.max(0, this.shiftT - dt);
       const top = pf.gears.length - 1;
@@ -132,8 +133,9 @@ export class Driver {
       rpmNow = rpmFor(pf, vf, this.gi, R);
       const prevGi = this.gi;
       if (this.ctl.trans !== 'manual') {
-        if (inp.gas && vf > 0 && rpmNow > pf.redline * 0.97 && this.gi < top) { this.gi++; this.shiftT = 0.22; }
-        else if (this.gi > 0 && rpmNow < Math.max(1900, pf.peakTqRpm * 0.5) && rpmFor(pf, vf, this.gi - 1, R) < pf.redline * 0.85) { this.gi--; this.shiftT = 0.12; }
+        const shK = pf.clutch?.shift || 1;
+        if (inp.gas && vf > 0 && rpmNow > pf.redline * 0.97 && this.gi < top) { this.gi++; this.shiftT = 0.22 * shK; }
+        else if (this.gi > 0 && rpmNow < Math.max(1900, pf.peakTqRpm * 0.5) && rpmFor(pf, vf, this.gi - 1, R) < pf.redline * 0.85) { this.gi--; this.shiftT = 0.12 * shK; }
       }
       const exSnd = this.car.b?.kit?.exhaustSound || 'sport';
       if (this.gi > prevGi && (exSnd === 'titanium' || exSnd === 'popbang')) {
@@ -149,6 +151,8 @@ export class Driver {
       this.burnout = !!(inp.gas && (inp.hand || (inp.brake && vf > -0.5)) && speed < 12);
       const limiter = rpmNow >= pf.redline;
       const thr = this.shiftT > 0 ? 0 : inp.gas;
+      // a race clutch bangs shifts home fast but shudders off the line
+      jerk = pf.clutch?.jerk || 0;
       if (inp.gas && vf < -0.5) Fbrake = 9 * m; // gas while rolling backwards = brake
       else if (inp.gas && !limiter) Fdrive = driveForce(pf, Math.max(0, vf), this.gi, thr, 50, R).a * m;
       if (!inp.gas && vf > 0.5) Fdrive -= m * (0.35 + (rpmNow / pf.redline) * 0.6); // engine braking
@@ -157,14 +161,23 @@ export class Driver {
       this.nosOn = !!(inp.nos && pf.nos && this.nos > 0.01 && inp.gas && vf > 2);
       if (this.nosOn) { Fdrive += (pf.peakHp * pf.nos * 745.7) / Math.max(vf, 12); this.nos = Math.max(0, this.nos - dt / 6); }
       else if (pf.nos) this.nos = Math.min(1, this.nos + dt / 20);
+      // engine wear: sustained high-rpm running on a knock-risky tune grinds the motor down.
+      // Parts are free — durability is the real price of an aggressive build.
+      if (pf.risk > 100 && inp.gas > 0.3 && rpmNow > pf.redline * 0.8) {
+        const w0 = this.wear;
+        this.wear = Math.min(1, this.wear + dt * ((pf.risk - 100) / 50) * 0.01 * (this.nosOn ? 1.6 : 1));
+        if (w0 < 0.5 && this.wear >= 0.5) this.car.onNotice?.('⚠️ เครื่องยนต์เริ่มสึก — แรงม้าหาย ควรเข้าอู่ซ่อม');
+        else if (w0 < 0.9 && this.wear >= 0.9) this.car.onNotice?.('🔥 เครื่องยนต์สึกหนัก! กำลังหายมาก — ซ่อมด่วน');
+      }
     } else if (inp.gas) Fdrive = m * 3.4 * (1 - Math.min(1, speed / 52));
+    if (Fdrive > 0) Fdrive *= 1 - 0.35 * (this.wear || 0); // a worn engine loses power
     if (inp.brake) { if (vf > 0.5) Fbrake = 9.6 * m * (pf?.brake || 1); else { reverse = true; Fdrive = -m * 2.8 * (1 - Math.min(1, speed / 12)); } }
-    const drag = pf ? m * dragAccel(pf, speed) : m * (0.012 * speed * speed + 0.25);
-    const cl = 0.12
-      + (kit.front === 'splitter' ? 0.08 : kit.front && kit.front !== 'none' ? 0.04 : 0)
-      + (kit.canard ? 0.04 : 0)
-      + (kit.rear === 'diffuser' ? 0.07 : kit.rear && kit.rear !== 'none' ? 0.03 : 0)
-      + (kit.spoiler === 'gt' || kit.spoiler === 'wing' ? 0.18 : kit.spoiler && kit.spoiler !== 'none' ? 0.08 : 0);
+    // toe scrubs a little straight-line speed: toe-out front / toe-in rear both add drag
+    const toeDrag = pf?.toe ? 1 + (Math.abs(pf.toe.f) + Math.abs(pf.toe.r)) * 0.03 : 1;
+    // slipstream: tucked in behind a peer's wake at speed → up to 40% less drag (set per frame from net play)
+    const draftCut = 1 - 0.4 * (this.draft || 0);
+    const drag = (pf ? m * dragAccel(pf, speed) : m * (0.012 * speed * speed + 0.25)) * toeDrag * draftCut;
+    const cl = pf?.cl ?? buildCl(kit);
     // ---- integrate in small sub-steps (tyre forces are stiff) ----
     let vx = vf, vy = vl, r = this.r ?? 0;
     const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
@@ -178,18 +191,25 @@ export class Driver {
       const Fzf = Math.max(0.15 * m * g, (m * g * b_) / WB - tr + down * 0.45);
       const Fzr = Math.max(0.15 * m * g, (m * g * a_) / WB + tr + down * 0.55);
       // load sensitivity: a heavily loaded axle gets a little less grip per kg
-      const muF = mu * (1.06 - 0.06 * Fzf / (m * g * 0.5)) * (pf?.lat || 1);
-      const muR = mu * (1.06 - 0.06 * Fzr / (m * g * 0.5)) * (pf?.lat || 1);
+      // ARB balance: a stiffer bar shifts cornering load to that axle → it gives up peak grip.
+      // The net grip roughly cancels — it's a balance/feel tool, not free performance.
+      const arbD = ((pf?.arb?.f ?? 0.5) - (pf?.arb?.r ?? 0.5)) * 0.1;
+      const muF = muF0 * (1.06 - 0.06 * Fzf / (m * g * 0.5)) * (pf?.lat || 1) * (1 - arbD);
+      const muR = muR0 * (1.06 - 0.06 * Fzr / (m * g * 0.5)) * (pf?.lat || 1) * (1 + arbD);
       let capF = muF * Fzf * camberLong, capR = muR * Fzr * camberLong;
       // longitudinal forces per axle
       const split = drv === 'FF' ? [1, 0] : drv === 'FR' ? [0, 1] : [0.42, 0.58];
       const dif = 0.9 * (pf?.lsd || 1); // open diff wastes the inside wheel; an LSD gets more down
       let FxF = Fdrive * split[0], FxR = Fdrive * split[1];
-      const capDF = capF * (split[0] ? dif : 1), capDR = capR * (split[1] ? dif : 1);
+      const capDF = capF * (split[0] ? dif : 1);
+      // decel-locking diffs (2-way / welded) loosen the rear under braking → rotation on
+      // entry, at the cost of stability; a hard clutch makes a standing launch harder too
+      const capDR = capR * (split[1] ? dif : 1) * (Fbrake > 0 ? 1 - 0.35 * (pf?.decel || 0) : 1) * (vx < 4 ? 1 - jerk * 0.3 : 1);
       // traction control (assist): no more torque than the driven tyres can take
       if (assist > 0.5) { FxF = Math.min(FxF, capDF * 1.02); FxR = Math.min(FxR, capDR * 1.02); }
       const sgn = Math.sign(vx) || 1;
-      FxF -= Fbrake * 0.66 * sgn; FxR -= Fbrake * 0.34 * sgn;
+      const bias = pf?.brakeBias ?? 0.66; // more rear bias = rotate on entry but easy to lock
+      FxF -= Fbrake * bias * sgn; FxR -= Fbrake * (1 - bias) * sgn;
       if (inp.hand && Math.abs(vx) > 1) FxR = -capR * 0.85 * sgn; // handbrake locks the rears
       const spinF = Math.max(0, Math.abs(FxF) / capDF - 1), spinR = Math.max(0, Math.abs(FxR) / capDR - 1);
       spinMax = Math.max(spinMax, split[0] ? spinF : 0, split[1] ? spinR : 0);
@@ -198,10 +218,11 @@ export class Driver {
         // a wheel that spins or locks has less sideways grip left (friction circle, tuned for responsive cornering)
         const latF = Math.sqrt(Math.max(0.18, 1 - 0.55 * (FxF / capF) ** 2)) / (1 + spinF * 1.4);
         const latR = Math.sqrt(Math.max(0.16, 1 - 0.6 * (FxR / capR) ** 2)) / (1 + spinR * 2.0) * (inp.hand && Math.abs(vx) > 1 ? 0.3 : 1);
-        // slip angles
+        // slip angles — front toe-out sharpens initial turn-in, rear toe-in damps the tail
         const vxs = Math.max(Math.abs(vx), 3.5);
-        const af = Math.atan2(vy + a_ * r, vxs) - delta;
-        const ar = Math.atan2(vy - b_ * r, vxs);
+        const deltaEff = delta * (1 + Math.max(0, pf?.toe?.f || 0) * 0.25);
+        const af = Math.atan2(vy + a_ * r, vxs) - deltaEff;
+        const ar = Math.atan2(vy - b_ * r, vxs) + (pf?.toe?.r || 0) * 0.008;
         const FyF = -MF(af, capF, 9.2) * latF, FyR = -MF(ar, capR, 11.2) * latR;
         slipMax = Math.max(slipMax, Math.abs(af) * (spinF > 0 ? 1.5 : 1), Math.abs(ar) * (1 + spinR));
         const cd = Math.cos(delta), sd = Math.sin(delta);
@@ -321,7 +342,7 @@ export class Driver {
     }
     if (!this.env) this.cones(dt);
     this.updateSound(inp.gas);
-    return { kmh, gear: this.gear, rpm: this.rpm, redline: pf ? pf.redline : 7000, nos: pf?.nos ? this.nos : null, nosOn: this.nosOn };
+    return { kmh, gear: this.gear, rpm: this.rpm, redline: pf ? pf.redline : 7000, nos: pf?.nos ? this.nos : null, nosOn: this.nosOn, wear: this.wear, draft: this.draft || 0 };
   }
 
   cones(dt) {

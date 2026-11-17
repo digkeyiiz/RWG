@@ -9,7 +9,7 @@ import { GENERATIONS } from './catalog.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const baht = (n) => '฿' + Math.round(n || 0).toLocaleString();
-const TRACK_NAMES = {
+export const TRACK_NAMES = {
   sprint: '⚡ สตรีทสปรินท์ ดินแดง-อโศก',
   touge: '⛰️ เขาใหญ่ Touge',
   city: '🏙️ ถนนพระราม 9 · อโศก',
@@ -235,6 +235,7 @@ export class GameWorld {
       this.lastInvite = d.id;
       const sp = d.hostSpec ? ` <small>(${esc(d.hostSpec.carName)} · ${d.hostSpec.cc.toLocaleString()}cc · ${d.hostSpec.hp}HP)</small>` : '';
       if (d.to === this.online.myId) this.feed(`⚔️ <b>${esc(d.host)}</b> ท้าดวลคุณ!${sp} ${TRACK_NAMES[d.track] || d.track} — กด <kbd>J</kbd> รับคำท้า`, 'invite duel');
+      else if (d.edit) this.feed(`🔄 <b>${esc(d.host)}</b> ปรับห้องแข่งเป็น${sp} ${TRACK_NAMES[d.track] || d.track} · ${d.laps} รอบ`);
       else this.feed(`🏁 <b>${esc(d.host)}</b> เปิดแข่ง${sp} ${TRACK_NAMES[d.track] || d.track} — กด <kbd>J</kbd> เข้าร่วม`, 'invite');
       this.sound('ping');
     }
@@ -416,6 +417,11 @@ export class GameWorld {
       const isDuel = l.toId === myId && !mine;
       const spec = l.hostSpec ? `${esc(l.hostSpec.carName)} · ${l.hostSpec.cc.toLocaleString()}cc · ${l.hostSpec.hp}HP (${esc(l.hostSpec.cls)}${l.hostSpec.pi})` : '';
       const waitRival = mine && l.hostId === myId && l.toName && l.members.length < 2 ? ` · รอ ${esc(l.toName)} ตอบรับ` : '';
+      const SHORT = { sprint: '⚡ สปรินท์', touge: '⛰️ เขา', city: '🏙️ ซิตี้', ring: '🛣️ วงแหวน' };
+      const editChips = mine && l.hostId === myId && !l.toName
+        ? `<div class="lb-edit">${Object.keys(SHORT).map((t) => `<button data-t="${t}" class="${l.track === t ? 'on' : ''}">${SHORT[t]}</button>`).join('')}</div>`
+        : '';
+      const memberNames = l.members.length ? `<small class="lb-members">👥 ${l.members.map(esc).join(' · ')}${l.bots ? ` +🤖${l.bots}` : ''}</small>` : '';
       const btns = mine
         ? `<div class="lb-btns">${l.hostId === myId ? '<button data-a="go" class="on">เริ่มเลย</button>' : ''}<button data-a="leave">ออก</button></div>`
         : isDuel
@@ -426,12 +432,14 @@ export class GameWorld {
         ${mine ? '' : '<button type="button" class="lb-x" data-a="dismiss" aria-label="ซ่อน">✕</button>'}
         ${spec ? `<small class="lb-spec">${spec}</small>` : ''}
         <small>${esc(l.host)} · ${l.laps} รอบ · ${l.members.length} คน · <span class="lt" data-ms="${l.startsIn}">${Math.ceil(l.startsIn / 1000)}</span> วิ${waitRival}</small>
+        ${memberNames}${editChips}
         ${btns}
       </div>`;
     }).join('');
     box.querySelectorAll('.lb button').forEach((b) => {
       const id = b.closest('.lb').dataset.id;
       b.onclick = async () => {
+        if (b.dataset.t) { await this.online.raceEdit({ track: b.dataset.t }); return; }
         if (b.dataset.a === 'dismiss') { this.dismissedLobbies.add(id); this.renderLobbies(); return; }
         if (b.dataset.a === 'join') { const r = await this.online.raceJoin(id); if (!r.ok) this.toast(r.err); else this.toast('เข้าร่วมแล้ว — รอเริ่มแข่ง'); }
         if (b.dataset.a === 'decline') { await this.online.raceDecline(id); this.dismissedLobbies.add(id); this.renderLobbies(); this.toast('ปฏิเสธคำท้าแล้ว'); }
