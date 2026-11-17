@@ -295,7 +295,15 @@ export class Driver {
       this.impact *= Math.exp(-4 * dt);
     } else {
       const lim = this.limit || 145;
-      if (this.pos.length() > lim) { this.pos.setLength(lim); this.vel.multiplyScalar(-0.3); }
+      const dl = this.pos.length();
+      if (dl > lim) {
+        // soft wall: clamp to the boundary and kill only the outward velocity —
+        // a hard -0.3 bounce flung the car backwards at speed (fake 'R' at 80 km/h)
+        const nx = this.pos.x / dl, nz = this.pos.z / dl;
+        const vn = this.vel.x * nx + this.vel.z * nz;
+        this.pos.setLength(lim);
+        if (vn > 0) { this.vel.x -= nx * vn; this.vel.z -= nz * vn; }
+      }
     }
     // body motion: spring-damper driven by shock settings
     const accel = (vf - this.prevVf) / dt;
